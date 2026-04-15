@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<div id="menu">
+  <h2>CHỌN NHÂN VẬT</h2>
+
+  <input id="nameInput" placeholder="Nhập tên..." />
+
+  <button onclick="select('soldier')">🪖 Soldier</button>
+  <button onclick="select('tank')">🛡 Tank</button>
+  <button onclick="select('assassin')">🥷 Assassin</button>
+</div>
+
+<canvas id="game" width="800" height="600" style="display:none;"></canvas>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ================= STATE =================
+let players = {};
+let bullets = [];
+let fireZones = [];
+let walls = [];
+let weaponDrops = [];
+let hitEffects = [];
+let manaDrops = [];
+let bombs = [];
+let explosions = [];
+let shake = 0;
+
+let started = false;
+
+// ================= IMAGES =================
+const characterImages = {
+  soldier: new Image(),
+  tank: new Image(),
+  assassin: new Image()
+};
+
+characterImages.soldier.src = "/assets/soldier.png";
+characterImages.tank.src = "/assets/tank.png";
+characterImages.assassin.src = "/assets/assassin.png";
+
+const bulletImg = new Image();
+bulletImg.src = "/assets/bullet.png";
+const manaImg = new Image();
+manaImg.src = "/assets/mana.png";
+const weaponImages = {
+  pistol: new Image(),
+  rifle: new Image(),
+  sniper: new Image(),
+  shotgun: new Image()
+};
+
+weaponImages.pistol.src = "/assets/pistol.png";
+weaponImages.rifle.src = "/assets/rifle.png";
+weaponImages.sniper.src = "/assets/sniper.png";
+weaponImages.shotgun.src = "/assets/shotgun.png";
+
+// ================= SAFE DRAW =================
+function drawImg(img, x, y, w, h) {
+  if (img && img.complete && img.naturalWidth > 0) {
+    ctx.drawImage(img, x, y, w, h);
+  } else {
+    ctx.fillStyle = "orange";
+    ctx.fillRect(x, y, w, h);
+  }
+}
+
+// ================= SELECT =================
+function select(type) {
+  const name = document.getElementById("nameInput").value || "Player";
+
+  socket.emit("selectCharacter", {
+    type,
+    name
+  });
+
+  document.getElementById("menu").style.display = "none";
+  canvas.style.display = "block";
+  started = true;
+}
+
+// ================= INPUT =================
+let keys = {};
+
+const KEY_MAP = new Set(["w","a","s","d"]);
+
+document.addEventListener("keydown", (e) => {
+  const k = (e.key || "").toLowerCase();
+  if (!KEY_MAP.has(k)) return;
+  keys[k] = true;
+});
+
+document.addEventListener("keyup", (e) => {
+  const k = (e.key || "").toLowerCase();
+  if (!KEY_MAP.has(k)) return;
+  keys[k] = false;
+});
+document.addEventListener("keydown", (e) => {
+  if (!e || !e.key) return;
+
+  if (String(e.key).toLowerCase() === "b") {
+    socket.emit("placeBomb");
+  }
+});
+setInterval(() => {
+  if (!started) return;
+
+  let dx = 0;
+  let dy = 0;
+
+  if (keys["w"]) dy -= 1;
+  if (keys["s"]) dy += 1;
+  if (keys["a"]) dx -= 1;
+  if (keys["d"]) dx += 1;
+
+  // ❗ quan trọng: không normalize nếu đứng yên
+  if (dx === 0 && dy === 0) {
+    socket.emit("input", { dx: 0, dy: 0 });
+    return;
+  }
+
+  // normalize mượt
+  const len = Math.hypot(dx, dy);
+  socket.emit("input", {
+    dx: dx / len,
+    dy: dy / len
+  });
+
+}, 1000 / 30);
+// ================= SHOOT =================
+canvas.addEventListener("click", e => {
+  const me = players[socket.id];
+  if (!me) return;
+
+  const rect = canvas.getBoundingClientRect();
+
+  let dx = e.clientX - rect.left - me.x;
+  let dy = e.clientY - rect.top - me.y;
+
+  let len = Math.hypot(dx, dy) || 1;
+
+  socket.emit("shoot", {
+    dx: dx / len,
+    dy: dy / len
+  });
+});
+
+// ================= SOCKET =================
+socket.on("state", data => {
+  players = data.players;
+  bullets = data.bullets;
+  fireZones = data.fireZones;
+  walls = data.walls;
+  weaponDrops = data.weaponDrops;
+  manaDrops = data.manaDrops; 
+  bombs = data.bombs || [];
+});
+
+socket.on("hitEffect", (data) => {
+  hitEffects.push({
+    x: data.x,
+    y: data.y,
+    damage: data.damage,
+    life: 20
+  });
+});
+
+// ================= DRAW LOOP =================
+function draw() {
+  ctx.clearRect(0, 0, 800, 600);
+
+  // WALLS
+  ctx.fillStyle = "gray";
+  walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));
+
+  // WEAPON DROPS
+  weaponDrops.forEach(w => {
+    drawImg(weaponImages[w.type], w.x - 10, w.y - 10, 20, 20);
+  });
+  // mana
+    manaDrops.forEach(m => {
+      drawImg(manaImg, m.x - 10, m.y - 10, 20, 20);
+
+    ctx.fillStyle = "cyan";
+    ctx.font = "10px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("+", m.x, m.y + 3);
+  });
+  // ================= BOMBS =================
+  bombs.forEach(b => {
+    ctx.fillStyle = b.armed ? "red" : "black";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "white";
+    ctx.font = "10px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(b.armed ? "💥" : "⏳", b.x, b.y + 4);
+  });
+
+  // PLAYERS
+  for (let id in players) {
+    let p = players[id];
+    if (!p) continue;
+
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath();
+    ctx.arc(p.x + 16, p.y + 34, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // character
+    drawImg(characterImages[p.type], p.x, p.y, 32, 32);
+
+    // name
+    ctx.fillStyle = "white";
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "center";
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 3;
+
+    ctx.strokeText(p.name, p.x + 16, p.y - 8);
+    ctx.fillText(p.name, p.x + 16, p.y - 8);
+
+    // HP
+    let hpPercent = Math.max(0, p.hp / 180);
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(p.x, p.y - 12, 34, 5);
+
+    ctx.fillStyle = "lime";
+    ctx.fillRect(p.x, p.y - 12, 34 * hpPercent, 5);
+
+    // MANA
+    let manaPercent = Math.max(0, (p.weaponMana ?? 0) / 100);
+
+    ctx.fillStyle = "black";
+    ctx.fillRect(p.x, p.y - 18, 34, 4);
+
+    ctx.fillStyle = "cyan";
+    ctx.fillRect(p.x, p.y - 18, 34 * manaPercent, 4);
+    // explosions
+    explosions.forEach(e => {
+      ctx.fillStyle = "rgba(100,100,100,0.4)";
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "orange";
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.radius / 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    // weapon
+    drawImg(weaponImages[p.weapon], p.x + 10, p.y + 8, 18, 18);
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (shake > 0) {
+      offsetX = (Math.random() - 0.5) * 10;
+      offsetY = (Math.random() - 0.5) * 10;
+      shake--;
+    }
+
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.restore();
+  }
+
+  // BULLETS
+  bullets.forEach(b => {
+    let angle = Math.atan2(b.dy, b.dx);
+
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(angle);
+    ctx.drawImage(bulletImg, -4, -4, 8, 8);
+    ctx.restore();
+  });
+
+  // HIT EFFECT (🔥 FIX: phải nằm trong draw loop)
+  for (let i = hitEffects.length - 1; i >= 0; i--) {
+  const e = hitEffects[i];
+
+  let power = Math.min(e.damage / 2, 40);
+
+  ctx.beginPath();
+  ctx.fillStyle = "rgba(255,0,0,0.5)";
+  ctx.arc(e.x + 16, e.y + 16, power, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.strokeStyle = "orange";
+  ctx.lineWidth = 3;
+  ctx.arc(e.x + 16, e.y + 16, power + 10, 0, Math.PI * 2);
+  ctx.stroke();
+
+  e.life--;
+
+  if (e.life <= 0) {
+    hitEffects.splice(i, 1);
+  }
+}
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+
+</body>
+</html>
