@@ -1,0 +1,71 @@
+/* ===== CHAT BOX ===== */
+#chatBox {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    width: 280px;
+    height: 180px;
+  
+    background: rgba(0, 0, 0, 0.75);
+    border: 2px solid #444;
+    border-radius: 8px;
+  
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  
+    font-family: Arial, sans-serif;
+  }
+  
+  /* ===== MESSAGE AREA ===== */
+  #messages {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+  
+    color: #fff;
+    font-size: 13px;
+  }
+  
+  /* Scroll đẹp hơn */
+  #messages::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  #messages::-webkit-scrollbar-thumb {
+    background: #666;
+    border-radius: 3px;
+  }
+  
+  /* ===== INPUT ===== */
+  #chatInput {
+    border: none;
+    outline: none;
+    padding: 8px;
+  
+    background: #111;
+    color: #fff;
+  
+    font-size: 13px;
+  }
+  
+  /* ===== TIN NHẮN ===== */
+  .chat-msg {
+    margin-bottom: 4px;
+  }
+  
+  .chat-name {
+    color: #4CAF50;
+    font-weight: bold;
+  }
+  
+  .chat-text {
+    color: #ddd;
+  }
+  #chatBox {
+    pointer-events: none; /* ❗ không cản click game */
+  }
+  
+  #chatInput {
+    pointer-events: auto; /* chỉ input nhận click */
+  }
