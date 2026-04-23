@@ -15,6 +15,7 @@ let fireZones = [];
 let weaponDrops = [];
 let manaDrops = [];
 let bombs = [];
+let zombies = [];
 
 const W = 800;
 const H = 600;
@@ -34,9 +35,14 @@ function getCharacter(type) {
   if (type === "hung") return { hp: 90, speed: 6, color: "orange" };
   if (type === "bomber") return { hp: 140, speed: 4, color: "orange" };
   if (type === "ghost") return { hp: 85, speed: 7, color: "black" };
+  if (type === "beauty") return {
+    hp: 100,
+    speed: 7,
+    color: "pink"
+  };
+
   return { hp: 120, speed: 6, color: "blue" };
 }
-
 
 // ================= WALLS =================
 const maps = {
@@ -48,13 +54,11 @@ const maps = {
 
       for (let y = 0; y < 15; y++) {
         for (let x = 0; x < 20; x++) {
-
           // viền
           if (x === 0 || y === 0 || x === 19 || y === 14) {
             walls.push({ x: x * tile, y: y * tile, w: tile, h: tile });
             continue;
           }
-
           // cây rải rác
           if (Math.random() < 0.12) {
             walls.push({
@@ -67,7 +71,6 @@ const maps = {
           }
         }
       }
-
       return walls;
     }
   },
@@ -265,7 +268,17 @@ function spawnHeal() {
     value: 40
   });
 }
-
+function spawnZombie(x, y, ownerId = null) {
+  zombies.push({
+    id: Math.random().toString(36).substr(2, 9),
+    x,
+    y,
+    hp: 120,
+    speed: 5,
+    damage: 8,
+    owner: ownerId
+  });
+}
 for (let i = 0; i < 2; i++) spawnHeal();
 function spawnMana() {
   const pos = getSafePosition();
@@ -296,6 +309,7 @@ io.on("connection", (socket) => {
   const pos = getSafePosition();
 
   players[socket.id] = {
+    id: socket.id,
     x: pos.x,
     y: pos.y,
     hp: 120,
@@ -303,8 +317,48 @@ io.on("connection", (socket) => {
     color: "blue",
     name: "Player_" + socket.id.slice(0, 4),
     type: "soldier",
-    weapon: "pistol"
+    weapon: "pistol",
+    isDisguised: false,
+    disguiseType: null
   };
+  socket.on("disguise", () => {
+    const p = players[socket.id];
+    if (!p) return;
+  
+    // toggle OFF
+    if (p.isDisguised) {
+      p.isDisguised = false;
+      p.disguiseType = null;
+      return;
+    }
+  
+    // tìm tường gần
+    let nearest = null;
+    let minDist = 80;
+  
+    for (let w of walls) {
+      let cx = w.x + w.w / 2;
+      let cy = w.y + w.h / 2;
+  
+      let dist = Math.hypot((p.x + 16) - cx, (p.y + 16) - cy);
+  
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = w;
+      }
+    }
+  
+    // nếu không có tường → random
+    if (!nearest) {
+      p.isDisguised = true;
+      p.disguiseType = Math.random() < 0.5 ? "wood" : "wall";
+      return;
+    }
+  
+    // bật disguise theo tường
+    p.isDisguised = true;
+    p.disguiseType = nearest.breakable ? "wood" : "wall";
+  });
   socket.on("changeMap", (name) => {
     if (!maps[name]) return;
   
@@ -348,21 +402,21 @@ io.on("connection", (socket) => {
 
     players[socket.id] = {
       ...old,
-
       x: pos.x,
       y: pos.y,
       hp: c.hp,
       speed: c.speed,
       color: c.color,
-
       name,
       type,
-
       weapon: randomWeapon(),
       weaponMana: old.weaponMana ?? 100,
       kills: 0,
       invisible: false,
-      invisibleUntil: 0
+      invisibleUntil: 0,
+      score: 0,   // ⭐ điểm rank
+      rank: "Wood",
+      stunnedUntil: 0,
     };
     io.emit("state", {
       players,
@@ -383,16 +437,43 @@ io.on("connection", (socket) => {
   });
   socket.on("input", (data) => {
     const p = players[socket.id];
-    if (!p) return;
-  
+    // 🧟 Nếu KHÔNG còn player → thử điều khiển zombie
+    if (!p) {
+      const myZombie = zombies.find(z => z.owner === socket.id);
+
+      if (!myZombie) return;
+
+      const dx = data.dx || 0;
+      const dy = data.dy || 0;
+
+      let len = Math.hypot(dx, dy) || 1;
+
+      myZombie.x += (dx / len) * myZombie.speed;
+      myZombie.y += (dy / len) * myZombie.speed;
+
+      return;
+    }
+    if (p.stunnedUntil && Date.now() < p.stunnedUntil) {
+      return; // 🚫 bị choáng → không di chuyển
+    }
+    if (p.isDisguised) {
+      const moving = Math.abs(data.dx) > 0 || Math.abs(data.dy) > 0;
+    
+      if (moving) {
+        p.isDisguised = false;
+      }
+    }
     const dx = data.dx || 0;
     const dy = data.dy || 0;
-    const speed = p.speed || 3;
+    let speed = p.speed || 3;
   
     // thử di chuyển X trước
     let newX = p.x + dx * speed;
     let newY = p.y + dy * speed;
-  
+      // 👇 bị slow
+    if (p.slowUntil && Date.now() < p.slowUntil) {
+      speed *= 0.5;
+    }
     // check X
     if (!collide(newX + 16, p.y + 16)) {
       p.x = newX;
@@ -407,9 +488,57 @@ io.on("connection", (socket) => {
     p.x = Math.max(0, Math.min(800 - 32, p.x));
     p.y = Math.max(0, Math.min(600 - 32, p.y));
   });
+  socket.on("claw", () => {
+    // Tìm zombie mà người chơi này đang điều khiển
+    const myZombie = zombies.find(z => z.owner === socket.id);
+    if (!myZombie) return;
+
+    // Tốc độ chạy cho Zombie (Cập nhật trực tiếp vào object zombie)
+    myZombie.speed = 4.5; // Tăng từ mức bình thường lên cao
+
+    // Cooldown cào (0.4 giây)
+    if (myZombie.lastClaw && Date.now() - myZombie.lastClaw < 400) return;
+    myZombie.lastClaw = Date.now();
+
+    // Phát hoạt ảnh cào cho tất cả (ngay cả khi trượt)
+    io.emit("clawAnimation", { 
+        x: myZombie.x, 
+        y: myZombie.y, 
+        angle: Math.random() * Math.PI * 2 
+    });
+
+    for (let id in players) {
+        const p = players[id];
+        if (!p) continue;
+
+        // Tính khoảng cách tâm-tâm
+        const dist = Math.hypot((p.x + 16) - myZombie.x, (p.y + 16) - myZombie.y);
+
+        if (dist < 45) { // Tầm cào
+            // 💀 CHẠM LÀ CHẾT
+            p.hp = 0;
+
+            io.emit("hitEffect", {
+                x: p.x,
+                y: p.y,
+                damage: "K.O" // Gửi text đặc biệt
+            });
+
+            // Biến thành zombie mới
+            spawnZombie(p.x, p.y, id);
+            delete players[id];
+        }
+    }
+});
   socket.on("shoot", (data) => {
     const p = players[socket.id];
     if (!p) return;
+    if (p.stunnedUntil && Date.now() < p.stunnedUntil) {
+      return;
+    }
+    if (p.isDisguised) {
+      p.isDisguised = false;
+    }
     // chặn bắn nếu bomber
     if (p.type === "bomber") return;
     if (p.type === "ghost") {
@@ -457,7 +586,8 @@ io.on("connection", (socket) => {
           dy: dy + i * 0.1,
           speed,
           damage,
-          owner: socket.id
+          owner: socket.id,
+          type: p.type 
         });
       }
 
@@ -473,7 +603,8 @@ io.on("connection", (socket) => {
           dy: dy + i * 0.08,
           speed,
           damage,
-          owner: socket.id
+          owner: socket.id,
+          type: p.type 
         });
       }
     } else {
@@ -484,7 +615,8 @@ io.on("connection", (socket) => {
         dy,
         speed,
         damage,
-        owner: socket.id
+        owner: socket.id,
+        type: p.type 
       });
     }
   });
@@ -547,6 +679,22 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     if (!p) return;
   
+    // 👇 BEAUTY SKILL
+    if (p.type === "beauty") {
+
+      for (let id in players) {
+        let target = players[id];
+        if (!target || id === socket.id) continue;
+
+        let dist = Math.hypot(p.x - target.x, p.y - target.y);
+
+        if (dist < 120) {
+          target.slowUntil = Date.now() + 2000; // chậm 2s
+        }
+      }
+
+      return;
+    }
     if (p.type !== "ghost") return;
   
     // cooldown đơn giản
@@ -601,7 +749,64 @@ function explode(x, y, ownerId) {
 }
 // ================= GAME LOOP =================
 setInterval(() => {
-
+  zombies.forEach(z => {
+    let target = null;
+    let minDist = 9999;
+   // 👇 nếu có owner thì KHÔNG dùng AI
+   if (z.owner) return;
+    // tìm player gần nhất
+    for (let id in players) {
+      let p = players[id];
+      let d = Math.hypot(p.x - z.x, p.y - z.y);
+  
+      if (d < minDist) {
+        minDist = d;
+        target = p;
+      }
+    }
+  
+    if (!target) return;
+  
+    // di chuyển về phía player
+    let dx = target.x - z.x;
+    let dy = target.y - z.y;
+    let len = Math.hypot(dx, dy) || 1;
+  
+    z.x += (dx / len) * z.speed;
+    z.y += (dy / len) * z.speed;
+  
+    // tấn công nếu gần
+    if (minDist < 20) {
+      target.hp -= z.damage;
+    
+      // 🔥 zombie cào chết player
+      if (target.hp <= 0) {
+        const dead = target;
+        if (!dead) return;
+        dead.type = "zombie";
+        // 🧟 biến thành zombie mới tại vị trí chết
+        zombies.push({
+          id: Math.random().toString(36).substr(2, 9),
+          x: dead.x,
+          y: dead.y,
+          hp: 120,
+          speed: 2.5,
+          damage: 10
+        });
+    
+        // 💀 xoá player
+        const deadId = Object.keys(players).find(pid => players[pid] === target);
+        delete players[deadId];     
+    
+        // (optional) hiệu ứng spawn zombie
+        io.emit("hitEffect", {
+          x: dead.x,
+          y: dead.y,
+          damage: "ZOMBIFIED"
+        });
+      }
+    }
+  });
   bullets = bullets.filter(b => {
     b.x += b.dx * b.speed;
     b.y += b.dy * b.speed;
@@ -631,6 +836,37 @@ setInterval(() => {
         return false; // xóa đạn
       }
     }
+    // ===== HIT ZOMBIE =====
+    for (let i = zombies.length - 1; i >= 0; i--) {
+      const z = zombies[i];
+
+      const dx = b.x - z.x;
+      const dy = b.y - z.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < 18) {
+        z.hp -= b.damage;
+
+        io.emit("hitEffect", {
+          x: z.x,
+          y: z.y,
+          damage: b.damage
+        });
+
+        // chết zombie
+        if (z.hp <= 0) {
+          zombies.splice(i, 1);
+
+          // thưởng điểm cho player
+          const killer = players[b.owner];
+          if (killer) {
+            killer.score += 10;
+          }
+        }
+
+        return false; // đạn biến mất
+      }
+    }
     for (let id in players) {
       const p = players[id];
       if (!p || id === b.owner) continue;
@@ -644,7 +880,23 @@ setInterval(() => {
       const dist = Math.hypot(dx, dy);
     
       if (dist < 18) {
-        p.hp -= b.damage;let dmg = b.damage;
+
+        // 🎯 stun nếu là beauty
+        if (b.type === "beauty") {
+          p.stunnedUntil = Date.now() + 1500;
+          io.emit("stunFX", {
+            id: id,
+            x: p.x,
+            y: p.y
+          });
+        }
+        // 🎭 LỘ NGUYÊN HÌNH KHI BỊ BẮN
+        if (p.isDisguised) {
+          p.isDisguised = false;
+          p.disguiseType = null;
+        }
+        p.hp -= b.damage;
+        let dmg = b.damage;
 
         if (p.type === "tank") {
           dmg = Math.floor(dmg * 0.7); // giảm 30% damage
@@ -658,12 +910,38 @@ setInterval(() => {
         });
     
         if (p.hp <= 0) {
-          if (players[b.owner]) {
-            players[b.owner].kills = (players[b.owner].kills || 0) + 1;
+          const killer = players[b.owner];
+          const victim = players[id];
+        
+          if (killer && id !== b.owner) {
+            killer.kills = (killer.kills || 0) + 1;
+        
+            // ⭐ CỘNG ĐIỂM
+            killer.score += 20;
+            io.emit("scoreFX", {
+              id: b.owner,
+              value: 20
+            });
+            const oldRank = killer.rank;
+            killer.rank = getRank(killer.score);
+        
+            // 🎉 hiệu ứng lên rank
+            if (oldRank !== killer.rank) {
+              io.emit("rankUpFX", {
+                id: b.owner,
+                rank: killer.rank
+              });
+            }
           }
-          // 💣 XÓA BOM CỦA PLAYER
+        
+          if (victim) {
+            // 💀 TRỪ ĐIỂM
+            victim.score = Math.max(0, victim.score - 10);
+            victim.rank = getRank(victim.score);
+          }
+        
           bombs = bombs.filter(b => b.owner !== id);
-
+          spawnZombie(p.x, p.y, id);
           delete players[id];
         }
     
@@ -829,27 +1107,6 @@ setInterval(() => {
       }
     }
   }
-  // // bombs (FIXED)
-  // for (let i = bombs.length - 1; i >= 0; i--) {
-  //   let b = bombs[i];
-
-  //   if (!b.armed && Date.now() >= b.armTime) {
-  //     b.armed = true;
-  //   }
-
-  //   if (b.armed) {
-  //     for (let id in players) {
-  //       let p = players[id];
-  //       let dist = Math.hypot(p.x - b.x, p.y - b.y);
-
-  //       if (dist < 25) {
-  //         explode(b.x, b.y); //💥 PHÁ TƯỜNG 
-  //         bombs.splice(i, 1);
-  //         break;
-  //       }
-  //     }
-  //   }
-  // }
   // 🥷 TẮT TÀNG HÌNH KHI HẾT TIME
   for (let id in players) {
     let p = players[id];
@@ -868,7 +1125,8 @@ setInterval(() => {
     weaponDrops,
     manaDrops,
     bombs,
-    healDrops
+    healDrops,
+    zombies
   });
 
 }, 1000 / 30);
@@ -902,14 +1160,31 @@ function applyExplosionDamage(x, y, ownerId) {
       });
 
       if (p.hp <= 0) {
-        // cộng kill
-        if (players[ownerId] && id !== ownerId) {
-          players[ownerId].kills = (players[ownerId].kills || 0) + 1;
+        const killer = players[ownerId];
+        const victim = players[id];
+      
+        if (killer && id !== ownerId) {
+          killer.kills = (killer.kills || 0) + 1;
+      
+          killer.score += 20;
+      
+          const oldRank = killer.rank;
+          killer.rank = getRank(killer.score);
+      
+          if (oldRank !== killer.rank) {
+            io.emit("rankUpFX", {
+              id: ownerId,
+              rank: killer.rank
+            });
+          }
         }
-
-        // xóa bomb của player chết
+      
+        if (victim) {
+          victim.score = Math.max(0, victim.score - 10);
+          victim.rank = getRank(victim.score);
+        }
+      
         bombs = bombs.filter(b => b.owner !== id);
-
         delete players[id];
       }
     }
@@ -920,7 +1195,6 @@ function loadMap(name) {
   walls = maps[name].generate();
   clearSpawnArea();
 
-  // reset world entities (QUAN TRỌNG)
    // reset đồ trong map (quan trọng)
    bullets = [];
    bombs = [];
@@ -938,6 +1212,13 @@ function broadcastMap() {
     name: currentMap,
     walls
   });
+}
+function getRank(score) {
+  if (score >= 1000) return "Diamond";
+  if (score >= 600) return "Gold";
+  if (score >= 300) return "Silver";
+  if (score >= 100) return "Bronze";
+  return "Wood";
 }
 server.listen(3000, () => {
   console.log("http://localhost:3000");
