@@ -752,22 +752,42 @@ setInterval(() => {
   zombies.forEach(z => {
     let target = null;
     let minDist = 9999;
-   // 👇 nếu có owner thì KHÔNG dùng AI
-   if (z.owner) return;
-    // tìm player gần nhất
-    for (let id in players) {
-      let p = players[id];
-      let d = Math.hypot(p.x - z.x, p.y - z.y);
   
-      if (d < minDist) {
-        minDist = d;
-        target = p;
+    const noPlayersLeft = Object.keys(players).length === 0;
+  
+    // ===== 🧠 CHỌN TARGET =====
+    if (!noPlayersLeft) {
+      // 🎯 target player (giữ nguyên)
+      if (z.owner) return;
+  
+      for (let id in players) {
+        let p = players[id];
+        let d = Math.hypot(p.x - z.x, p.y - z.y);
+  
+        if (d < minDist) {
+          minDist = d;
+          target = p;
+        }
+      }
+  
+    } else {
+      // 💀 KHÔNG CÒN PLAYER → zombie đánh nhau
+  
+      for (let other of zombies) {
+        if (other === z) continue; // ❌ không tự đánh mình
+  
+        let d = Math.hypot(other.x - z.x, other.y - z.y);
+  
+        if (d < minDist) {
+          minDist = d;
+          target = other;
+        }
       }
     }
   
     if (!target) return;
   
-    // di chuyển về phía player
+    // ===== 🚶 MOVE =====
     let dx = target.x - z.x;
     let dy = target.y - z.y;
     let len = Math.hypot(dx, dy) || 1;
@@ -775,35 +795,62 @@ setInterval(() => {
     z.x += (dx / len) * z.speed;
     z.y += (dy / len) * z.speed;
   
-    // tấn công nếu gần
+    // ===== ⚔️ ATTACK =====
     if (minDist < 20) {
-      target.hp -= z.damage;
+
+      // ⏱ cooldown 500ms
+      if (z.lastHit && Date.now() - z.lastHit < 500) return;
+      z.lastHit = Date.now();
     
-      // 🔥 zombie cào chết player
-      if (target.hp <= 0) {
-        const dead = target;
-        if (!dead) return;
-        dead.type = "zombie";
-        // 🧟 biến thành zombie mới tại vị trí chết
-        zombies.push({
-          id: Math.random().toString(36).substr(2, 9),
-          x: dead.x,
-          y: dead.y,
-          hp: 120,
-          speed: 2.5,
-          damage: 10
-        });
-    
-        // 💀 xoá player
-        const deadId = Object.keys(players).find(pid => players[pid] === target);
-        delete players[deadId];     
-    
-        // (optional) hiệu ứng spawn zombie
-        io.emit("hitEffect", {
-          x: dead.x,
-          y: dead.y,
-          damage: "ZOMBIFIED"
-        });
+      target.hp -= 10; // fix damage luôn = 10
+  
+      // 🎯 nếu target là player
+      if (!noPlayersLeft) {
+        if (target.hp <= 0) {
+          const dead = target;
+  
+          zombies.push({
+            id: Math.random().toString(36).substr(2, 9),
+            x: dead.x,
+            y: dead.y,
+            hp: 120,
+            speed: 2.5,
+            damage: 10
+          });
+  
+          const deadId = Object.keys(players).find(pid => players[pid] === target);
+          delete players[deadId];
+  
+          io.emit("hitEffect", {
+            x: dead.x,
+            y: dead.y,
+            damage: "ZOMBIFIED"
+          });
+        }
+      } 
+      // 💀 nếu target là zombie
+      else {
+        if (target.hp <= 0) {
+          const index = zombies.indexOf(target);
+          if (index !== -1) zombies.splice(index, 1);
+      
+          // 💪 EVOLVE (buff zombie thắng)
+          z.hp += 20;
+          z.damage += 2;
+          z.speed += 0.2;
+      
+          // 🧱 giới hạn để không bị quá bá
+          if (z.hp > 300) z.hp = 300;
+          if (z.damage > 25) z.damage = 25;
+          if (z.speed > 8) z.speed = 8;
+      
+          // ✨ hiệu ứng
+          io.emit("hitEffect", {
+            x: z.x,
+            y: z.y,
+            damage: "EVOLVE"
+          });
+        }
       }
     }
   });
@@ -847,6 +894,13 @@ setInterval(() => {
       if (dist < 18) {
         z.hp -= b.damage;
 
+        // ===== 💥 KNOCKBACK =====
+        const kbForce = 10; // lực đẩy (tăng/giảm tùy cảm giác)
+
+        let len = Math.hypot(b.dx, b.dy) || 1;
+
+        z.x += (b.dx / len) * kbForce;
+        z.y += (b.dy / len) * kbForce;
         io.emit("hitEffect", {
           x: z.x,
           y: z.y,
@@ -1099,7 +1153,7 @@ setInterval(() => {
           let dist = Math.hypot((p.x + 16) - b.x, (p.y + 16) - b.y);
   
           if (dist < 20) {
-            explode(b.x, b.y);
+            explode(b.x, b.y, b.owner);
             bombs.splice(i, 1);
             continue; // 🔥 FIX
           }
@@ -1186,6 +1240,34 @@ function applyExplosionDamage(x, y, ownerId) {
       
         bombs = bombs.filter(b => b.owner !== id);
         delete players[id];
+      }
+    }
+  }
+  // ===== 💀 DAMAGE ZOMBIE =====
+  for (let i = zombies.length - 1; i >= 0; i--) {
+    let z = zombies[i];
+
+    let dist = Math.hypot(z.x - x, z.y - y);
+
+    if (dist < 80) {
+      let damage = Math.max(3, 20 - dist * 0.5);
+
+      z.hp -= damage;
+
+      io.emit("hitEffect", {
+        x: z.x,
+        y: z.y,
+        damage
+      });
+
+      if (z.hp <= 0) {
+        zombies.splice(i, 1);
+
+        // ⭐ thưởng điểm cho người đặt bomb
+        const killer = players[ownerId];
+        if (killer) {
+          killer.score += 10;
+        }
       }
     }
   }
