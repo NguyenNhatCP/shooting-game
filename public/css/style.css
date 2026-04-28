@@ -1,44 +1,88 @@
 #HUD {
-    position: absolute;
-    bottom: 10px; /* cách đáy canvas */
-    left: 50%;
-    transform: translateX(-50%);
-    width: 780px;
-    height: 60px;
-    background: rgba(0,0,0,0.5);
-    border-radius: 8px;
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    color: white;
-    pointer-events: none; /* quan trọng: không chặn click lên canvas */
-  }
-  
-  #HPBarContainer, #ManaBarContainer {
-    display: flex;
-    flex-direction: column;
-    width: 180px;
-  }
-  
-  #HPBar, #ManaBar {
-    height: 14px;
-    width: 100%;
-    background: #222;
-    border-radius: 7px;
-    overflow: hidden;
-    margin-top: 2px;
-    transition: width 0.2s ease;
-  }
-  
-  #HPBar {
-    background: linear-gradient(to right, #00ff4c, #ff2d2d);
-  }
-  
-  #ManaBar {
-    background: linear-gradient(to right, #00f0ff, #0066ff);
-  }
-  
-  #WeaponInfo {
-    font-weight: bold;
-    font-size: 16px;
-  }
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 750px;
+  height: 70px;
+  /* Hiệu ứng kính mờ */
+  background: rgba(20, 20, 20, 0.7);
+  backdrop-filter: blur(10px); 
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  color: white;
+  pointer-events: none;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#HPBarContainer, #ManaBarContainer {
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+}
+
+#HPBarContainer span, #ManaBarContainer span {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+/* Thanh máu/mana nền */
+#HPBar, #ManaBar {
+  height: 12px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Hiệu ứng Gradient và Glow cho thanh HP */
+#HPBar {
+  background: linear-gradient(90deg, #ff2d2d, #ff6b6b);
+  box-shadow: 0 0 10px rgba(255, 45, 45, 0.5);
+}
+
+/* Hiệu ứng Gradient và Glow cho thanh Mana */
+#ManaBar {
+  background: linear-gradient(90deg, #0066ff, #00f0ff);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+
+#WeaponInfo {
+  font-weight: 900;
+  font-size: 18px;
+  color: #ffd700; /* Màu vàng Gold cho vũ khí */
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  background: rgba(255,255,255,0.05);
+  padding: 8px 15px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255,255,255,0.2);
+}
+
+
+/* .preview3d {
+  width: 100%;
+  height: 110px;
+  display: block;
+  filter: drop-shadow(0 0 5px rgba(0,0,0,0.5));
+} */
+
+/* Tạo một lớp phủ bóng bẩy */
+.char-card::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: linear-gradient(225deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+  pointer-events: none;
+}
+

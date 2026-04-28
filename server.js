@@ -530,6 +530,127 @@ io.on("connection", (socket) => {
         }
     }
 });
+socket.on("bomberPull", () => {
+  const p = players[socket.id];
+  if (!p || p.type !== "bomber") return;
+  p.isPulled = true;
+
+  setTimeout(() => {
+    if (p) p.isPulled = false;
+  }, 400); // 0.4s lock nhẹ
+  const px = p.x + 16;
+  const py = p.y + 16;
+
+  const radius = 200;
+  const power = 8;
+
+  // ================= PULL PLAYER =================
+  for (let id in players) {
+    const t = players[id];
+    if (!t) continue;
+    if (id === socket.id) continue;
+
+    let dx = px - (t.x + 16);
+    let dy = py - (t.y + 16);
+
+    let dist = Math.hypot(dx, dy);
+
+    if (dist < radius) {
+      let force = (1 - dist / radius) * power;
+
+      t.x += (dx / dist) * force;
+      t.y += (dy / dist) * force;
+    }
+  }
+
+  // ================= PULL ZOMBIE =================
+  for (let z of zombies) {
+    let dx = px - z.x;
+    let dy = py - z.y;
+
+    let dist = Math.hypot(dx, dy);
+
+    if (dist < radius) {
+      let force = (1 - dist / radius) * power;
+
+      z.x += (dx / dist) * force;
+      z.y += (dy / dist) * force;
+    }
+  }
+
+  io.emit("bomberPullFX", {
+    x: p.x,
+    y: p.y,
+    radius
+  });
+});
+  socket.on("assassinSpin", () => {
+    const p = players[socket.id];
+    if (!p || p.type !== "assassin") return;
+
+    const px = p.x + 16;
+    const py = p.y + 16;
+
+    const range = 70;
+    const damage = 30;
+
+    // ================= PLAYER DAMAGE =================
+    for (let id in players) {
+      const t = players[id];
+      if (!t || id === socket.id) continue;
+
+      const dist = Math.hypot((t.x + 16) - px, (t.y + 16) - py);
+
+      if (dist < range) {
+        t.hp -= damage;
+
+        io.emit("hitEffect", {
+          x: t.x,
+          y: t.y,
+          damage
+        });
+
+        if (t.hp <= 0) {
+          const killer = players[socket.id];
+          if (killer) killer.score += 10;
+
+          spawnZombie(t.x, t.y, id);
+          delete players[id];
+        }
+      }
+    }
+
+    // ================= ZOMBIE DAMAGE (🔥 THÊM MỚI) =================
+    for (let i = zombies.length - 1; i >= 0; i--) {
+      const z = zombies[i];
+
+      const dist = Math.hypot(z.x - px, z.y - py);
+
+      if (dist < range) {
+        z.hp -= damage;
+
+        io.emit("hitEffect", {
+          x: z.x,
+          y: z.y,
+          damage
+        });
+
+        if (z.hp <= 0) {
+          zombies.splice(i, 1);
+
+          const killer = players[socket.id];
+          if (killer) killer.score += 5; // ít hơn player
+        }
+      }
+    }
+
+    // ================= FX =================
+    io.emit("assassinSpinFX", {
+      x: p.x,
+      y: p.y,
+      range
+    });
+  });
   socket.on("shoot", (data) => {
     const p = players[socket.id];
     if (!p) return;
@@ -539,6 +660,7 @@ io.on("connection", (socket) => {
     if (p.isDisguised) {
       p.isDisguised = false;
     }
+    
     // chặn bắn nếu bomber
     if (p.type === "bomber") return;
     if (p.type === "ghost") {
@@ -720,6 +842,7 @@ function explode(x, y, ownerId) {
     { dx: 0, dy: -1 }
   ];
 
+  // 🔥 luôn damage tại tâm trước
   applyExplosionDamage(x, y, ownerId);
 
   dirs.forEach(d => {
@@ -735,16 +858,16 @@ function explode(x, y, ownerId) {
           io.emit("breakWallFX", { x: tx, y: ty });
         }
 
-        // ✔ CHỈ DAMAGE 1 LẦN RỒI DỪNG
         applyExplosionDamage(tx, ty, ownerId);
         break;
       }
 
-      // ✔ chỉ lan khi KHÔNG có wall
+      // 🔥 đảm bảo zombie luôn bị ảnh hưởng
       applyExplosionDamage(tx, ty, ownerId);
     }
   });
 
+  // 🔥 thêm FX zombie chết rõ hơn
   io.emit("explosionFX", { x, y });
 }
 // ================= GAME LOOP =================

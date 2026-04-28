@@ -1,866 +1,221 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Bắn Súng Sinh Tồn</title>
-    <style>
-        body { margin: 0; overflow: hidden; background: #222; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: Arial; }
-        canvas { background: #eee; border: 4px solid #444; display: none; cursor: crosshair; }
-        #menu { background: white; padding: 20px; border-radius: 10px; text-align: center; }
-    </style>
-    <link rel="stylesheet" href="./css/chat.css">
-    <link rel="stylesheet" href="./css/style.css">
+
+<head>
+  <title>Bắn Súng Sinh Tồn - Chọn Nhân Vật</title>
+  <style>
+    body {
+      margin: 0;
+      background: #1a1a1a;
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    h2 {
+      margin-top: 30px;
+      letter-spacing: 2px;
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+    }
+
+    /* Lưới chứa các card nhân vật */
+    .char-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 20px;
+      width: 90%;
+      max-width: 1000px;
+      padding: 20px;
+    }
+
+    /* Style cho từng Card nhân vật */
+    .char-card {
+      background: linear-gradient(145deg, #222, #333);
+      border: 2px solid #444;
+      border-radius: 15px;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      position: relative;
+    }
+
+    .char-card:hover {
+      transform: translateY(-10px);
+      border-color: #00f0ff;
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+    }
+
+    .char-card p {
+      margin: 10px 0 5px;
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+
+    /* Canvas chứa preview 3D */
+    .preview3d {
+      width: 100%;
+      height: 150px;
+      /* Tăng chiều cao để nhìn rõ model */
+      display: block;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    #nameInput {
+      margin-top: 20px;
+      padding: 12px 20px;
+      border-radius: 25px;
+      border: none;
+      width: 250px;
+      outline: none;
+    }
+
+    /* Ẩn game lúc đầu */
+    #gameContainer,
+    #HUD,
+    #leaderboard {
+      display: none;
+    }
+  </style>
 </head>
 
 <body>
+  <div id="menu">
+    <h2>CHỌN NHÂN VẬT</h2>
 
-<div id="menu">
-  <h2>CHỌN NHÂN VẬT</h2>
-
-  <input id="nameInput" placeholder="Nhập tên..." />
-
-  <button onclick="select('soldier')">🪖 Soldier</button>
-  <button onclick="select('tank')">🛡 Tank</button>
-  <button onclick="select('assassin')">🥷 Assassin</button>
-  <button onclick="select('hung')">🧙 Mr.Hung</button>
-  <button onclick="select('bomber')">💣 Bình Bomber</button>
-  <button onclick="select('ghost')">👻 Ghost (Tàng hình)</button>
-  <button onclick="select('beauty')">💖 Mỹ nữ</button>
-</div>
-
-<div id="gameContainer" style="position: relative; width: 800px; height: 600px;">
-  <canvas id="gameCanvas" width="800" height="600"></canvas>
-</div>
- <!-- 🏆 LEADERBOARD -->
- <div id="leaderboard" style="
- position:absolute;
- top:10px;
- right:10px;
- background:rgba(0,0,0,0.6);
- color:white;
- padding:10px;
- font-size:12px;
- border-radius:8px;
- min-width:150px;
- pointer-events:none;
-">
- <b>🏆 TOP</b>
- <div id="lbList"></div>
-</div>
-<!-- HUD dưới gameplay -->
-<div id="HUD" style="width:800px; height:60px; background:rgba(0,0,0,0.6); color:white; display:flex; justify-content:space-around; align-items:center; font-family:Arial; margin-top:5px;">
-  <div id="HPBarContainer">
-    <span>HP</span>
-    <div id="HPBar" style="width:120px; height:12px; background:red; border-radius:4px;"></div>
-  </div>
-  <div id="ManaBarContainer">
-    <span>MANA</span>
-    <div id="ManaBar" style="width:120px; height:12px; background:cyan; border-radius:4px;"></div>
-  </div>
-  <div id="WeaponInfo">🔫 PISTOL</div>
-  <!-- 🏆 RANK -->
-  <div id="RankInfo">🏆 Wood (0)</div>
-</div>
-<!-- <canvas touch-action: none; id="game" width="800" height="600" style="display:none;"></canvas> -->
-<div id="chatBox">
-  <div id="messages"></div>
-  <input id="chatInput" placeholder="Nhập tin nhắn..." />
-</div>
-<script src="/socket.io/socket.io.js"></script>
-<script>
-const socket = io();
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
-
-// ================= STATE =================
-let players = {};
-let bullets = [];
-let fireZones = [];
-let walls = [];
-let weaponDrops = [];
-let hitEffects = [];
-let manaDrops = [];
-let bombs = [];
-let explosions = [];
-let healDrops = [];
-let shake = 0;
-let stunEffects = [];
-let zombies = [];
-let clawAnims = [];
-
-let started = false;
-let chatting = false;
-
-// ================= IMAGES =================
-const characterImages = {
-  soldier: new Image(),
-  tank: new Image(),
-  assassin: new Image(),
-  hung: new Image(),
-  bomber: new Image()
-};
-
-characterImages.soldier.src = "/assets/soldier.png";
-characterImages.tank.src = "/assets/tank.png";
-characterImages.assassin.src = "/assets/assassin.png";
-characterImages.hung.src = "/assets/hung.png";
-characterImages.bomber.src = "/assets/binh.png";
-characterImages.ghost = new Image();
-characterImages.ghost.src = "/assets/ghost.png";
-characterImages.beauty = new Image();
-characterImages.beauty.src = "/assets/beauty.png";
-
-const zombieImg = new Image();
-zombieImg.src = "/assets/zombie.png";
-const bulletImg = new Image();
-bulletImg.src = "/assets/bullet.png";
-const manaImg = new Image();
-manaImg.src = "/assets/mana.png";
-const wallImg = new Image();
-wallImg.src = "/assets/wall.png"; // tường cứng
-const bombImg = new Image();
-bombImg.src = "/assets/bomb.png";
-// const grassImg = new Image();
-// grassImg.src = "/assets/grass.png";
-const mineImg = new Image();
-mineImg.src = "/assets/mine.png";
-
-const woodImg = new Image();
-woodImg.src = "/assets/wood.png"; // tường phá được
-const weaponImages = {
-  pistol: new Image(),
-  rifle: new Image(),
-  sniper: new Image(),
-  shotgun: new Image(),
-  heal: new Image()
-};
-const messagesDiv = document.getElementById("messages");
-const chatInput = document.getElementById("chatInput");
-weaponImages.pistol.src = "/assets/pistol.png";
-weaponImages.rifle.src = "/assets/rifle.png";
-weaponImages.sniper.src = "/assets/sniper.png";
-weaponImages.shotgun.src = "/assets/shotgun.png";
-weaponImages.heal.src = "/assets/heal.png";
-
-// ================= SAFE DRAW =================
-function drawImg(img, x, y, w, h) {
-  if (img && img.complete && img.naturalWidth > 0) {
-    ctx.drawImage(img, x, y, w, h);
-  } else {
-    ctx.fillStyle = "orange";
-    ctx.fillRect(x, y, w, h);
-  }
-}
-
-// ================= SELECT =================
-function select(type) {
-  const name = document.getElementById("nameInput").value || "Player";
-
-  socket.emit("selectCharacter", {
-    type,
-    name
-  });
-
-  document.getElementById("menu").style.display = "none";
-  canvas.style.display = "block";
-  started = true;
-}
-
-// ================= CHAT INPUT =================
-chatInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && chatInput.value.trim() !== "") {
-    socket.emit("chat", chatInput.value);
-    chatInput.value = "";
-  }
-});
-chatInput.addEventListener("focus", () => {
-  chatting = true;
-});
-
-chatInput.addEventListener("blur", () => {
-  chatting = false;
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    if (!chatting) {
-      chatInput.focus();
-    }
-  }
-
-  if (e.key === "Escape") {
-    chatInput.blur();
-  }
-});
-// ================= INPUT (FIXED) =================
-const keys = { w:false, a:false, s:false, d:false };
-document.addEventListener("keydown", (e) => {
-  if (chatting) return;
-
-  // 🥷 E để hóa trang
-  if (e.key.toLowerCase() === "e") {
-    socket.emit("disguise");
-  }
-
-  const k = e.key.toLowerCase();
-  if (k in keys) keys[k] = true;
-});
-document.addEventListener("keydown", (e) => {
-  if (chatting) return;
-  const k = e.key.toLowerCase();
-
-  if (k in keys) keys[k] = true;
-});
-
-document.addEventListener("keyup", (e) => {
-  const k = e.key.toLowerCase();
-
-  if (k in keys) keys[k] = false;
-});
-window.addEventListener("blur", () => {
-    // Reset tất cả phím về false khi người chơi click ra ngoài trình duyệt
-    keys.w = keys.a = keys.s = keys.d = false;
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "1") {
-    socket.emit("changeMap", "city");
-  }
-
-  if (e.key === "2") {
-    socket.emit("changeMap", "forest");
-  }
-
-  if (e.key === "3") {
-    socket.emit("changeMap", "desert");
-  }
-});
-// 1. Chỉ lắng nghe các phím cần thiết
-let canSkill = true;
-document.addEventListener("keydown", (e) => {
-    if (chatting) return;
-    // keys[e.key.toLowerCase()] = true;
-    
-    // Đặt bom (giữ nguyên logic của bạn)
-    if (e.code === "Space" && !e.repeat) {
-      e.preventDefault();
-      socket.emit("placeBomb");
-    }
-     // 🥷 SKILL TÀNG HÌNH
-     if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
-        if (!canSkill) return;
-
-        socket.emit("skill");
-        canSkill = false;
-
-        setTimeout(() => {
-            canSkill = true;
-        }, 3000);
-    }
-});
-window.addEventListener("blur", () => {
-  keys.w = keys.a = keys.s = keys.d = false;
-});
-
-canvas.addEventListener("mousedown", (e) => {
-    if (e.button !== 0 || chatting) return;
-
-    const me = players[socket.id];
-    // Nếu không còn trong list players, có thể mình đang là zombie
-    if (!me) {
-        socket.emit("claw"); // Thử gửi claw nếu là zombie chủ
-        return;
-    }
-
-    // Nếu vẫn là player nhưng là class zombie (tùy logic game của bạn)
-    if (me.type === "zombie") {
-        socket.emit("claw");
-    } else {
-        shoot(e);
-    }
-});
-function shoot(e) {
-  const me = players[socket.id];
-  if (!me) return;
-
-  const rect = canvas.getBoundingClientRect();
-
-  let dx = e.clientX - rect.left - me.x;
-  let dy = e.clientY - rect.top - me.y;
-
-  let len = Math.hypot(dx, dy) || 1;
-
-  socket.emit("shoot", {
-    dx: dx / len,
-    dy: dy / len,
-    type: me.type
-  });
-}
-// ================= SOCKET =================
-socket.on("clawAnimation", (data) => {
-    clawAnims.push({
-        x: data.x + 20, // Căn chỉnh vào tâm
-        y: data.y + 20,
-        angle: data.angle,
-        life: 1.0
-    });
-});
-socket.on("chat", (data) => {
-  const msg = document.createElement("div");
-  msg.classList.add("chat-msg");
-
-  msg.innerHTML = `
-    <span class="chat-name">${data.name}:</span>
-    <span class="chat-text">${data.message}</span>
-  `;
-
-  messagesDiv.appendChild(msg);
-  messagesDiv.scrollTop = messagesDiv.scrollHeight;
-});
-socket.on("stunFX", (data) => {
-  stunEffects.push({
-    id: data.id,   // ⭐ THÊM DÒNG NÀY
-    start: Date.now()
-  });
-});
-socket.on("state", data => {
-  
-  players = data.players;
-  bullets = data.bullets;
-  fireZones = data.fireZones;
-  walls = data.walls;
-  weaponDrops = data.weaponDrops;
-  manaDrops = data.manaDrops; 
-  bombs = data.bombs || [];
-  healDrops = data.healDrops || [];
-  zombies = data.zombies || [];
-});
-socket.on("breakWallFX", (data) => {
-  explosions.push({
-    x: data.x,
-    y: data.y,
-    radius: 25,
-    life: 10
-  });
-});
-socket.on("hitEffect", (data) => {
-    if (data.damage === "K.O") {
-        shake = 25; // Rung màn hình mạnh
-        // Tạo thêm nhiều hạt máu
-        for(let i=0; i<10; i++) {
-            explosions.push({
-                x: data.x + 16,
-                y: data.y + 16,
-                radius: Math.random() * 6 + 2,
-                life: 15
-            });
-        }
-    }
-
-    hitEffects.push({
-        x: data.x,
-        y: data.y,
-        damage: data.damage,
-        life: 25
-    });
-});
-socket.on("explosionFX", (data) => {
-  explosions.push({
-    x: data.x,
-    y: data.y,
-    radius: 60,
-    life: 15
-  });
-});
-socket.on("mapChanged", (data) => {
-  walls = data.walls;
-  const me = players[socket.id];
-  if (me) {
-    // teleport về vị trí an toàn
-    const pos = getSafePosition();
-    me.x = pos.x;
-    me.y = pos.y;
-  }
-});
-const lbList = document.getElementById("lbList");
-
-socket.on("state", (state) => {
-  const players = state.players;
-
-  // convert object → array
-  let list = Object.values(players);
-
-  // sort theo score giảm dần
-  list.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-  // lấy top 5
-  list = list.slice(0, 5);
-
-  // render
-  lbList.innerHTML = list.map((p, i) => `
-    <div>
-      ${i + 1}. ${p.name} (${p.score || 0})
+    <div class="char-grid" id="charGrid">
+      <div class="char-card" onclick="select('soldier')">
+        <canvas class="preview3d"></canvas>
+        <p>Soldier</p>
+      </div>
+      <div class="char-card" onclick="select('tank')">
+        <canvas class="preview3d"></canvas>
+        <p>Tank</p>
+      </div>
+      <div class="char-card" onclick="select('assassin')">
+        <canvas class="preview3d"></canvas>
+        <p>Assassin</p>
+      </div>
+      <div class="char-card" onclick="select('bomber')">
+        <canvas class="preview3d"></canvas>
+        <p>Bomber</p>
+      </div>
+      <div class="char-card" onclick="select('ghost')">
+        <canvas class="preview3d"></canvas>
+        <p>Ghost</p>
+      </div>
+      <div class="char-card" onclick="select('hung')">
+        <canvas class="preview3d"></canvas>
+        <p>Mr. Hung</p>
+      </div>
+      <div class="char-card" onclick="select('beauty')">
+        <canvas class="preview3d"></canvas>
+        <p>Beauty</p>
+      </div>
     </div>
-  `).join("");
-});
-socket.on("scoreFX", (data) => {
-  const p = players[data.id];
-  if (!p) return;
 
-  hitEffects.push({
-    x: p.x,
-    y: p.y,
-    damage: `+${data.value}`,
-    life: 30,
-    type: "score"
-  });
-});
-socket.on("rankUpFX", (data) => {
-  const p = players[data.id];
-  if (!p) return;
-
-  // 💥 hiệu ứng nổ lớn
-  explosions.push({
-    x: p.x,
-    y: p.y,
-    radius: 100,
-    life: 25
-  });
-
-  // 🎉 text bay lên
-  hitEffects.push({
-    x: p.x,
-    y: p.y,
-    damage: "RANK UP!",
-    life: 30
-  });
-});
-// ================= DRAW LOOP =================
-function draw() {
-  ctx.clearRect(0, 0, 800, 600);
-  ctx.fillStyle = "#3fa34d";
-  ctx.fillRect(0, 0, 800, 600);
-  // WALLS
-  // ctx.fillStyle = "gray";
-  // walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));
-  walls.forEach(w => {
-    if (w.breakable) {
-      drawImg(woodImg, w.x, w.y, w.w, w.h); // 🪵 wood
-    } else {
-      drawImg(wallImg, w.x, w.y, w.w, w.h); // 🧱 tường cứng
-    }
-  });
-  // ================= HEAL DROPS =================
-  healDrops.forEach(h => {
-    drawImg(weaponImages.heal, h.x - 10, h.y - 10, 20, 20);
-
-    ctx.fillStyle = "red";
-    ctx.font = "10px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText("+", h.x, h.y + 3);
-  });
-  // ================= WEAPON DROPS =================
-  weaponDrops.forEach(w => {
-    drawImg(weaponImages[w.type], w.x - 10, w.y - 10, 20, 20);
-
-    ctx.fillStyle = "white";
-    ctx.font = "10px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText(w.type.toUpperCase(), w.x, w.y + 18);
-  });
-
-  // ================= MANA DROPS =================
-  manaDrops.forEach(m => {
-    drawImg(manaImg, m.x - 10, m.y - 10, 20, 20);
-
-    ctx.fillStyle = "cyan";
-    ctx.font = "10px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText("+MANA", m.x, m.y + 18);
-  });
-  // ================= VẼ HOẠT ẢNH MÓNG VUỐT 🧟 =================
-  for (let i = clawAnims.length - 1; i >= 0; i--) {
-      let anim = clawAnims[i];
-      ctx.save();
-      ctx.translate(anim.x, anim.y);
-      ctx.rotate(anim.angle);
-      ctx.globalAlpha = anim.life;
-      
-      ctx.strokeStyle = "#FF2200"; // Đỏ rực
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = "red";
-
-      // Vẽ 3 vệt cào cong (Bezier)
-      for (let j = -1; j <= 1; j++) {
-          let offset = j * 10;
-          ctx.beginPath();
-          ctx.moveTo(offset - 10, -15);
-          ctx.quadraticCurveTo(offset + 5, 0, offset - 10, 15);
-          ctx.stroke();
-      }
-      ctx.restore();
-
-      anim.life -= 0.07; // Tốc độ biến mất
-      if (anim.life <= 0) clawAnims.splice(i, 1);
-  }
-  // ================= ZOMBIES =================
-  zombies.forEach(z => {
-    const t = Date.now() * 0.004;
-
-    const wobbleX = Math.sin(t + z.id.length) * 3;
-    const wobbleY = Math.cos(t + z.id.length) * 3;
-
-    // glow shadow
-    ctx.save();
-    ctx.shadowColor = "green";
-    ctx.shadowBlur = 12;
-
-    drawImg(
-      zombieImg,
-      z.x - 25 + wobbleX,
-      z.y - 25 + wobbleY,
-      50,
-      50
-    );
-
-    ctx.restore();
-
-    // HP BAR BACK
-    ctx.fillStyle = "black";
-    ctx.fillRect(z.x - 18, z.y - 28, 36, 5);
-
-    // HP BAR FILL
-    ctx.fillStyle = "#00ff66";
-    ctx.fillRect(z.x - 18, z.y - 28, (z.hp / 60) * 36, 5);
-
-    // NAME / ICON
-    ctx.fillStyle = "white";
-    ctx.font = "12px Arial";
-    ctx.textAlign = "center";
-    ctx.fillText("🧟 Zombie", z.x, z.y + 28);
-  });
-  // ================= BOMBS =================
-  for (let i = 0; i < bombs.length; i++) {
-  let b = bombs[i];
-  if (!b) continue;
-  // 👇 mỹ nữ glow nhẹ
-  if (b.type === "beauty") {
-    ctx.shadowColor = "pink";
-    ctx.shadowBlur = 10;
-  }
-  // 👻 mine tàng hình với người khác
-  if (b.type === "mine" && b.owner !== socket.id) continue;
-
-  const img = b.type === "mine" ? mineImg : bombImg;
-
-  drawImg(img, b.x - 12, b.y - 12, 24, 24);
-
-  ctx.fillStyle = "white";
-  ctx.font = "10px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText(b.armed ? "💥" : "⏳", b.x, b.y + 18);
-}
-  // PLAYERS
-  for (let id in players) {
-    let p = players[id];
-    if (!p) continue;
-    const isMe = id === socket.id;
-    const isGhostStealth = p.type === "ghost" && p.invisible;
-
-    // 👻 NGƯỜI KHÁC: KHÔNG THẤY LUÔN
-    if (isGhostStealth && !isMe) continue;
-
-    ctx.save();
-    // 👻 CHỈ CHÍNH MÌNH thấy mờ
-    if (isGhostStealth && isMe) {
-      ctx.globalAlpha = 0.35;
-    }
-    // shadow
-    if (!p.isDisguised) {
-      ctx.fillStyle = "rgba(0,0,0,0.2)";
-      ctx.beginPath();
-      ctx.arc(p.x + 16, p.y + 34, 10, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // character
-    const SIZE = 40; // 👈 bằng tile map
-
-    if (p.isDisguised && p.disguiseType) {
-      const img = p.disguiseType === "wood" ? woodImg : wallImg;
-      drawImg(img, p.x, p.y, SIZE, SIZE);
-    } else {
-      drawImg(characterImages[p.type], p.x, p.y, SIZE, SIZE);
-    }
-    if (!p.isDisguised) {
-      // name
-      ctx.fillStyle = "white";
-      ctx.font = "bold 12px Arial";
-      ctx.textAlign = "center";
-      ctx.strokeStyle = "black";
-      ctx.lineWidth = 3;
-
-      // NAME
-      ctx.strokeText(p.name, p.x + 16, p.y - 18);
-      ctx.fillText(p.name, p.x + 16, p.y - 18);
-
-      // RANK
-      ctx.font = "bold 10px Arial";
-      ctx.fillStyle = getRankColor(p.rank);
-      ctx.fillText(`🏆 ${p.rank}`, p.x + 16, p.y - 30);
-
-      // HP
-      let hpPercent = Math.max(0, p.hp / 180);
-
-      ctx.fillStyle = "black";
-      ctx.fillRect(p.x, p.y - 12, 34, 5);
-
-      ctx.fillStyle = "lime";
-      ctx.fillRect(p.x, p.y - 12, 34 * hpPercent, 5);
-      ctx.restore();
-      // MANA
-      let manaPercent = Math.max(0, (p.weaponMana ?? 0) / 100);
-
-      ctx.fillStyle = "black";
-      ctx.fillRect(p.x, p.y - 18, 34, 4);
-
-      ctx.fillStyle = "cyan";
-      ctx.fillRect(p.x, p.y - 18, 34 * manaPercent, 4);
-      ctx.restore(); 
-      // explosions
-      for (let i = explosions.length - 1; i >= 0; i--) {
-      const e = explosions[i];
-
-      ctx.fillStyle = "rgba(255,150,0,0.3)";
-      ctx.beginPath();
-      ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "orange";
-      ctx.beginPath();
-      ctx.arc(e.x, e.y, e.radius / 2, 0, Math.PI * 2);
-      ctx.fill();
-      e.life--;
-
-      if (e.life <= 0) {
-        explosions.splice(i, 1);
+    <input id="nameInput" placeholder="Nhập tên chiến binh..." />
+  </div>
+  <div id="gameContainer" style="position: relative; width: 800px; height: 600px;"> <canvas id="gameCanvas" width="800"
+      height="600"></canvas> </div> <!-- 🏆 LEADERBOARD -->
+  <div id="leaderboard"
+    style=" position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.6); color:white; padding:10px; font-size:12px; border-radius:8px; min-width:150px; pointer-events:none; ">
+    <b>🏆 TOP</b>
+    <div id="lbList"></div>
+  </div> <!-- HUD dưới gameplay -->
+  <div id="HUD"
+    style="width:800px; height:60px; background:rgba(0,0,0,0.6); color:white; display:flex; justify-content:space-around; align-items:center; font-family:Arial; margin-top:5px;">
+    <div id="HPBarContainer"> <span>HP</span>
+      <div id="HPBar" style="width:120px; height:12px; background:red; border-radius:4px;"></div>
+    </div>
+    <div id="ManaBarContainer"> <span>MANA</span>
+      <div id="ManaBar" style="width:120px; height:12px; background:cyan; border-radius:4px;"></div>
+    </div>
+    <div id="WeaponInfo">🔫 PISTOL</div> <!-- 🏆 RANK -->
+    <div id="RankInfo">🏆 Wood (0)</div>
+    <div id="chatBox"> 
+      <div id="messages">
+    </div> 
+    <input id="chatInput" placeholder="Nhập tin nhắn..." /> 
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="./js/draw.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js"
       }
     }
-  }
-    // weapon
-    if (!p.isDisguised) {
-      if (p.type === "bomber") {
-        ctx.fillText("💣", p.x + 16, p.y - 2);
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "https://unpkg.com/three@0.161.0/examples/jsm/loaders/GLTFLoader.js";
+
+    const loader = new GLTFLoader();
+
+    // Hàm tạo preview cho từng canvas
+    function createPreview(canvas, path) {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+
+      // Đặt camera hơi cao lên và nhìn xuống
+      camera.position.set(0, 0.2, 3);
+
+      const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 2));
+
+      loader.load(path, (gltf) => {
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        // Căn giữa X, Z và hạ thấp Y một chút
+        model.position.set(-center.x, -center.y - 0.2, -center.z);
+
+        const maxDim = Math.max(size.x, size.y, size.z);
+        model.scale.setScalar(1.6 / maxDim);
+
+        scene.add(model);
+
+        // Chạy animation bên trong để đảm bảo có model mới quay
+        const animate = () => {
+          requestAnimationFrame(animate);
+          model.rotation.y += 0.01;
+          renderer.render(scene, camera);
+        };
+        animate();
+      });
+    }
+
+    // Danh sách model khớp với số lượng card
+    const models = [
+      "/models/soldier.glb",
+      "/models/tank.glb",
+      "/models/assassin.glb",
+      "/models/bomber.glb",
+      "/models/ghost.glb",
+      "/models/hung.glb",
+      "/models/beauty.glb"
+    ];
+
+    // Khởi tạo toàn bộ preview
+    const cards = document.querySelectorAll(".char-card");
+    cards.forEach((card, i) => {
+      const canvas = card.querySelector(".preview3d");
+      if (models[i]) {
+        createPreview(canvas, models[i]);
       }
-      else if (p.type === "hung") {
-        ctx.fillText("✨", p.x + 16, p.y - 2);
-      }
-      else {
-        drawImg(weaponImages[p.weapon], p.x + 10, p.y + 8, 18, 18);
-      }
-    }
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (shake > 0) {
-      offsetX = (Math.random() - 0.5) * 10;
-      offsetY = (Math.random() - 0.5) * 10;
-      shake--;
-    }
-
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.restore();
-  }
-  // ================= STUN EFFECT (CHIM BAY) =================
-  stunEffects = stunEffects.filter(e => {
-    const duration = 1500;
-    const t = Date.now() - e.start;
-
-    if (t > duration) return false;
-
-    const p = players[e.id];
-    if (!p) return false;
-
-    const cx = p.x + 16;
-    const cy = p.y - 8;
-
-    const birdCount = 3;
-    const radius = 14;
-
-    for (let i = 0; i < birdCount; i++) {
-      const angle = (t * 0.01) + (i * (Math.PI * 2 / birdCount));
-
-      const bx = cx + Math.cos(angle) * radius;
-      const by = cy + Math.sin(angle) * radius;
-
-      ctx.strokeStyle = "black";
-      ctx.lineWidth = 2;
-
-      ctx.beginPath();
-      ctx.moveTo(bx - 4, by);
-      ctx.lineTo(bx, by - 3);
-      ctx.lineTo(bx + 4, by);
-      ctx.stroke();
-    }
-
-    return true;
-  });
-  // BULLETS
-  bullets.forEach(b => {
-  let angle = Math.atan2(b.dy, b.dx);
-
-  ctx.save();
-  ctx.translate(b.x, b.y);
-  ctx.rotate(angle);
-
-  // ❤️ CHỈ beauty bắn tim
-    if (b.type === "beauty") {
-      ctx.fillStyle = "red";
-      ctx.font = "14px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      ctx.shadowColor = "pink";
-      ctx.shadowBlur = 10;
-
-      ctx.fillText("❤️", 0, 0);
-      ctx.shadowBlur = 0;
-    } 
-    else {
-      ctx.drawImage(bulletImg, -4, -4, 8, 8);
-    }
-
-      ctx.restore();
-  });
-
-  // HIT EFFECT (🔥 FIX: phải nằm trong draw loop)
-  for (let i = hitEffects.length - 1; i >= 0; i--) {
-  const e = hitEffects[i];
-
-  // ❌ Ẩn hit nếu target đang tàng hình (trừ bản thân)
-  const target = Object.values(players).find(p =>
-    Math.hypot(p.x - e.x, p.y - e.y) < 30
-  );
-  if (target && target.invisible && target.id !== socket.id) continue;
-
-  let power = Math.min(e.damage / 2, 40);
-
-  // 💥 vòng hit (giữ lại)
-  ctx.beginPath();
-  ctx.fillStyle = "rgba(255,0,0,0.4)";
-  ctx.arc(e.x + 16, e.y + 16, power, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.strokeStyle = "orange";
-  ctx.lineWidth = 2;
-  ctx.arc(e.x + 16, e.y + 16, power + 8, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // 💢 ICON HIT
-  ctx.font = "18px Arial";
-  ctx.textAlign = "center";
-  ctx.fillStyle = "white";
-  ctx.fillText("☠️", e.x + 16, e.y - e.life * 2);
-
-  // 🔴 DAMAGE BAY LÊN
-  ctx.fillStyle = "red";
-  ctx.font = "bold 14px Arial";
- // ctx.fillText(`-${e.damage}`, e.x + 16, e.y - 20 - e.life * 2);
-  if (typeof e.damage === "string") {
-
-  // ⭐ SCORE
-  if (e.type === "score") {
-    ctx.fillStyle = "#00ff88";
-    ctx.font = "bold 16px Arial";
-  }
-
-  // 🎉 RANK UP
-  else {
-    ctx.fillStyle = "yellow";
-    ctx.font = "bold 16px Arial";
-  }
-
-  ctx.fillText(e.damage, e.x + 16, e.y - 20 - e.life * 2);
-
-  } else {
-
-  // 🔴 DAMAGE
-  ctx.fillStyle = "red";
-  ctx.font = "bold 14px Arial";
-  ctx.fillText(`-${e.damage}`, e.x + 16, e.y - 20 - e.life * 2);
-  }
-  // 🎬 giảm life để bay lên
-  e.life--;
-  e.y -= 0.5; 
-
-  if (e.life <= 0) {
-    hitEffects.splice(i, 1);
-  }
-}
-
-  requestAnimationFrame(draw);
-}
-function update() {
-  const dx =
-    (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
-  const dy =
-    (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
-
-  if (dx !== 0 || dy !== 0) {
-    const len = Math.hypot(dx, dy);
-
-    socket.emit("input", {
-      dx: dx / len,
-      dy: dy / len
     });
-  }
-}
-draw();
-function loop() {
-  if (started && !chatting) {
-    update();
-  }
-  requestAnimationFrame(loop);
-}
-loop();
-function updateHUDDiv() {
-  const me = players[socket.id];
-  if (!me) return;
 
-  const hpMax = me.type === "tank" ? 200 : me.type === "assassin" ? 80 : 120;
-
-  const hpPercent = Math.max(0, me.hp) / hpMax * 100;
-  const manaPercent = Math.max(0, me.weaponMana ?? 0) / 100 * 100;
-
-  document.getElementById("HPBar").style.width = hpPercent + "%";
-  document.getElementById("ManaBar").style.width = manaPercent + "%";
-
-  document.getElementById("WeaponInfo").innerText =
-    `🔫 ${me.weapon.toUpperCase()}`;
-
-  // ⭐ RANK
-  document.getElementById("RankInfo").innerText =
-    `🏆 ${me.rank} (${me.score})`;
-}
-
-// update HUD liên tục
-setInterval(updateHUDDiv, 1000 / 30);
-function getSafePosition() {
-  return {
-    x: Math.random() * 700 + 50,
-    y: Math.random() * 500 + 50
-  };
-}
-function getRankColor(rank) {
-  switch(rank) {
-    case "Bronze": return "#cd7f32";
-    case "Silver": return "#c0c0c0";
-    case "Gold": return "#ffd700";
-    case "Diamond": return "#00e5ff";
-    default: return "white";
-  }
-}
-</script>
-
+  </script>
 </body>
+
 </html>
