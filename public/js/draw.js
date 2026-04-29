@@ -20,6 +20,7 @@ let clawAnims = [];
 let spinFX = [];
 let pullFX = [];
 let pulledState = {}; 
+let webs = [];
 let started = false;
 let chatting = false;
 
@@ -53,6 +54,9 @@ const wallImg = new Image();
 wallImg.src = "/assets/wall.png"; // tường cứng
 const bombImg = new Image();
 bombImg.src = "/assets/bomb.png";
+// Load ảnh Spider-Man
+characterImages.spider = new Image();
+characterImages.spider.src = "/assets/spider.png";
 // const grassImg = new Image();
 // grassImg.src = "/assets/grass.png";
 const mineImg = new Image();
@@ -96,7 +100,6 @@ window.select = function(type) {
     type: type,
     name: name
   });
-
   // 3. Xử lý UI
   const menu = document.getElementById("menu");
   if (menu) menu.style.display = "none";
@@ -141,6 +144,9 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "f") {
     socket.emit("assassinSpin");
+  }
+  if (e.key === "q") {
+    socket.emit("spiderAttack");
   }
   if (e.key === "Escape") {
     chatInput.blur();
@@ -245,7 +251,6 @@ function shoot(e) {
   let dy = e.clientY - rect.top - me.y;
 
   let len = Math.hypot(dx, dy) || 1;
-
   socket.emit("shoot", {
     dx: dx / len,
     dy: dy / len,
@@ -289,7 +294,6 @@ socket.on("stunFX", (data) => {
   });
 });
 socket.on("state", data => {
-
   players = data.players;
   bullets = data.bullets;
   fireZones = data.fireZones;
@@ -299,6 +303,7 @@ socket.on("state", data => {
   bombs = data.bombs || [];
   healDrops = data.healDrops || [];
   zombies = data.zombies || [];
+  webs = data.webs || [];
 });
 socket.on("breakWallFX", (data) => {
   explosions.push({
@@ -425,6 +430,28 @@ function draw() {
   ctx.clearRect(0, 0, 800, 600);
   ctx.fillStyle = "#3fa34d";
   ctx.fillRect(0, 0, 800, 600);
+  webs.forEach(w => {
+    const owner = players[w.owner];
+    if (owner) {
+        ctx.save();
+        
+        // Vẽ sợi dây tơ
+        ctx.beginPath();
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2;
+        ctx.moveTo(owner.x + 16, owner.y + 16); // Từ Spider-Man
+        ctx.lineTo(w.x, w.y);                   // Đến đầu tơ
+        ctx.stroke();
+
+        // Vẽ đầu tơ (cái chấm trắng)
+        ctx.beginPath();
+        ctx.fillStyle = "white";
+        ctx.arc(w.x, w.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+  });
   // WALLS
   // ctx.fillStyle = "gray";
   // walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));

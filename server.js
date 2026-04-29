@@ -16,6 +16,7 @@ let weaponDrops = [];
 let manaDrops = [];
 let bombs = [];
 let zombies = [];
+let webs = [];
 
 const W = 800;
 const H = 600;
@@ -35,11 +36,8 @@ function getCharacter(type) {
   if (type === "hung") return { hp: 90, speed: 6, color: "orange" };
   if (type === "bomber") return { hp: 140, speed: 4, color: "orange" };
   if (type === "ghost") return { hp: 85, speed: 7, color: "black" };
-  if (type === "beauty") return {
-    hp: 100,
-    speed: 7,
-    color: "pink"
-  };
+  if (type === "beauty") return { hp: 100, speed: 7, color: "pink"};
+  if (type === "spider") return { hp: 110, speed: 6, color: "black", webCooldown: 0};
 
   return { hp: 120, speed: 6, color: "blue" };
 }
@@ -388,6 +386,33 @@ io.on("connection", (socket) => {
       message: "Map changed → " + name
     });
   });
+  // 🕷️ DÁN VÀO ĐÂY: Logic kỹ năng kết liễu của Spider-Man
+  socket.on("spiderAttack", () => {
+    const p = players[socket.id];
+    if (!p || p.type !== "spider") return;
+
+    const attackRange = 60;
+    const damage = 60;
+
+    for (let id in players) {
+        if (id === socket.id) continue;
+        let target = players[id];
+
+        let d = Math.hypot(p.x - target.x, p.y - target.y);
+        if (d < attackRange) {
+            target.hp -= damage;
+            
+            // QUAN TRỌNG: Kiểm tra nếu mục tiêu hết máu
+            if (target.hp <= 0) {
+                target.hp = 0; 
+                // Gọi hàm xử lý chết (Xem bước 2)
+                handleDeath(id, socket.id); 
+            } else {
+                io.emit("hitEffect", { x: target.x, y: target.y, damage: damage });
+            }
+        }
+    }
+});
   socket.on("selectCharacter", (data) => {
     console.log("SELECT:", data);
   
@@ -660,7 +685,28 @@ socket.on("bomberPull", () => {
     if (p.isDisguised) {
       p.isDisguised = false;
     }
-    
+    // 🕸️ SPIDER → BẮN TƠ THAY VÌ ĐẠN
+    if (p.type === "spider") {
+      if (p.webCooldown && Date.now() < p.webCooldown) return;
+  
+      let len = Math.hypot(data.dx, data.dy) || 1;
+      let webSpeed = 15; // Tốc độ bay của đầu tơ
+  
+      webs.push({
+          id: Math.random().toString(36).substr(2, 9),
+          owner: socket.id,
+          x: p.x + 16,
+          y: p.y + 16,
+          vx: (data.dx / len) * webSpeed,
+          vy: (data.dy / len) * webSpeed,
+          active: true, // Đang bay
+          hit: false,   // Đã trúng mục tiêu chưa
+          life: Date.now() + 2000 
+      });
+  
+      p.webCooldown = Date.now() + 600;
+      return;
+  }
     // chặn bắn nếu bomber
     if (p.type === "bomber") return;
     if (p.type === "ghost") {
@@ -672,7 +718,21 @@ socket.on("bomberPull", () => {
   
     let damage = 10;
     let speed = 10;
-  
+      // ================= TANK EXPLOSIVE BULLET =================
+    if (p.type === "tank") {
+      bullets.push({
+        x: p.x,
+        y: p.y,
+        dx,
+        dy,
+        speed: 8, // chậm hơn đạn thường
+        damage: 12, // damage trực tiếp thấp
+        owner: socket.id,
+        type: "tank_explosive"
+      });
+
+      return; // ❗ không chạy xuống dưới
+    }
     // ================= MANA COST =================
     let manaCost = 10;
 
@@ -794,9 +854,11 @@ socket.on("bomberPull", () => {
       explodeTime: Date.now() + 1200
     });
   });
-  socket.on("state", data => {
-    players = data.players;
-  });
+  // socket.on("state", data => {
+  //   players = data.players;
+  //   webs = data.webs || [];
+  //   console.log(webs);
+  // });
   socket.on("skill", () => {
     const p = players[socket.id];
     if (!p) return;
@@ -872,6 +934,13 @@ function explode(x, y, ownerId) {
 }
 // ================= GAME LOOP =================
 setInterval(() => {
+  updateWebs();
+  // 2. DÁN ĐOẠN CHECK MÁU VÀO ĐÂY (Trước khi gửi dữ liệu về client)
+  for (let id in players) {
+    if (players[id].hp <= 0) {
+        handleDeath(id, null); // Hàm này sẽ hồi sinh hoặc xóa player
+    }
+}
   zombies.forEach(z => {
     let target = null;
     let minDist = 9999;
@@ -994,7 +1063,9 @@ setInterval(() => {
         b.y > w.y;
     
       if (hit) {
-    
+        if (b.type === "tank_explosive") {
+          explode(b.x, b.y, b.owner);
+        }
         // 💥 NỔ KHI CHẠM TƯỜNG
         //explode(b.x, b.y);
     
@@ -1029,7 +1100,10 @@ setInterval(() => {
           y: z.y,
           damage: b.damage
         });
-
+        if (b.type === "tank_explosive") {
+          explode(b.x, b.y, b.owner);
+          return false;
+        }
         // chết zombie
         if (z.hp <= 0) {
           zombies.splice(i, 1);
@@ -1072,11 +1146,13 @@ setInterval(() => {
           p.isDisguised = false;
           p.disguiseType = null;
         }
-        p.hp -= b.damage;
         let dmg = b.damage;
-
+        if (b.type === "tank_explosive") {
+          explode(b.x, b.y, b.owner);
+          return false;
+        }
         if (p.type === "tank") {
-          dmg = Math.floor(dmg * 0.7); // giảm 30% damage
+          dmg = Math.floor(dmg * 0.7);
         }
         
         p.hp -= dmg;
@@ -1303,7 +1379,8 @@ setInterval(() => {
     manaDrops,
     bombs,
     healDrops,
-    zombies
+    zombies,
+    webs
   });
 
 }, 1000 / 30);
@@ -1311,7 +1388,9 @@ function applyExplosionDamage(x, y, ownerId) {
   for (let id in players) {
     let p = players[id];
     if (!p) continue;
-
+  
+    // 🚫 KHÔNG DAMAGE CHÍNH MÌNH
+    if (id === ownerId) continue;
     let dist = Math.hypot(p.x - x, p.y - y);
 
     if (dist < 80) { // ✅ tăng range cho mượt hơn
@@ -1424,6 +1503,128 @@ function getRank(score) {
   if (score >= 300) return "Silver";
   if (score >= 100) return "Bronze";
   return "Wood";
+}
+function updateWebs() {
+  for (let i = webs.length - 1; i >= 0; i--) {
+      let w = webs[i];
+      let p = players[w.owner];
+
+      // 1. Kiểm tra nếu người chơi không tồn tại hoặc tơ hết hạn
+      if (!p || Date.now() > w.life) {
+          webs.splice(i, 1);
+          continue;
+      }
+
+      // 2. Di chuyển đầu tơ
+      if (!w.hit) {
+          w.x += w.vx;
+          w.y += w.vy;
+
+          // --- 3. KIỂM TRA VA CHẠM TƯỜNG ---
+          let hitWall = false;
+          for (let wall of walls) {
+              if (w.x > wall.x && w.x < wall.x + wall.w &&
+                  w.y > wall.y && w.y < wall.y + wall.h) {
+                  
+                  // Tính khoảng cách tới 4 cạnh để đẩy Player ra mép ngoài
+                  let dLeft   = Math.abs(w.x - wall.x);
+                  let dRight  = Math.abs(w.x - (wall.x + wall.w));
+                  let dTop    = Math.abs(w.y - wall.y);
+                  let dBottom = Math.abs(w.y - (wall.y + wall.h));
+
+                  let minDist = Math.min(dLeft, dRight, dTop, dBottom);
+                  const pSize = 32; // Kích thước nhân vật (pixel)
+
+                  if (minDist === dLeft) {
+                      p.x = wall.x - pSize;
+                      p.y = w.y - 16;
+                  } else if (minDist === dRight) {
+                      p.x = wall.x + wall.w;
+                      p.y = w.y - 16;
+                  } else if (minDist === dTop) {
+                      p.x = w.x - 16;
+                      p.y = wall.y - pSize;
+                  } else if (minDist === dBottom) {
+                      p.x = w.x - 16;
+                      p.y = wall.y + wall.h;
+                  }
+
+                  hitWall = true;
+                  break; 
+              }
+          }
+
+          if (hitWall) {
+              webs.splice(i, 1);
+              continue;
+          }
+
+          // --- 4. KIỂM TRA VA CHẠM PLAYER KHÁC ---
+          for (let id in players) {
+              if (id === w.owner) continue;
+              let target = players[id];
+              
+              // Tính khoảng cách giữa đầu tơ và tâm đối thủ
+              let dist = Math.hypot(w.x - (target.x + 16), w.y - (target.y + 16));
+              
+              if (dist < 25) { 
+                // 1. Dịch chuyển Spider-Man tới mục tiêu
+                p.x = target.x;
+                p.y = target.y;
+
+                // 2. Trói đối thủ (Stun) trong 1.5 giây
+                target.stunnedUntil = Date.now() + 1500; 
+                
+                // 3. Gây sát thương nhẹ khi trúng tơ
+                target.hp -= 20; 
+
+                // 4. Gửi tín hiệu hiệu ứng choáng về cho tất cả người chơi
+                io.emit("stunFX", { id: target.id }); 
+
+                // 5. Xóa sợi tơ ngay lập tức
+                webs.splice(i, 1);
+                break; // Thoát khỏi vòng lặp check player cho sợi tơ này
+            }
+          }
+      }
+  }
+}
+function handleDeath(victimId, killerId) {
+  const victim = players[victimId];
+  const killer = players[killerId];
+
+  if (!victim) return;
+
+  // Hiệu ứng nổ khi chết
+  io.emit("explosionFX", { x: victim.x, y: victim.y });
+
+  // --- LOGIC DIỆT ZOMBIE ---
+  // if (victim.type === "zombie") {
+  //     // Nếu là Zombie bị giết -> Hồi sinh thành người bình thường (Soldier)
+  //     victim.type = "soldier"; 
+  //     victim.hp = 120;
+  //     victim.name = victim.name.replace("Z- ", ""); // Xóa chữ Z- ở tên
+  //     console.log(`${victim.id} đã được giải cứu khỏi kiếp Zombie!`);
+  // } 
+  if (killer && killer.type === "spider") {
+      // Nếu người thường bị Spider giết -> Biến thành Zombie
+      victim.type = "zombie";
+      victim.hp = 80;
+      victim.name = "Z- " + victim.name;
+  } 
+  else {
+      // Chết do các nguyên nhân khác
+      victim.hp = 120;
+  }
+
+  // Đưa về vị trí ngẫu nhiên
+  victim.x = Math.random() * 700 + 50;
+  victim.y = Math.random() * 500 + 50;
+
+  // Cộng điểm cho người giết
+  if (killer) {
+      killer.score += 100;
+  }
 }
 server.listen(3000, () => {
   console.log("http://localhost:3000");
