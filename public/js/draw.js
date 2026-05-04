@@ -24,6 +24,14 @@ let webs = [];
 let burnEffects = [];
 let started = false;
 let chatting = false;
+let screenFlashRed = 0;
+let zone = {
+  x: 400,
+  y: 300,
+  radius: 500,
+  minRadius: 80,
+  shrinkSpeed: 0.04
+};
 
 // ================= IMAGES =================
 const characterImages = {
@@ -277,6 +285,36 @@ function shoot(e) {
     type: me.type
   });
 }
+socket.on("zoneUpdate", (data) => {
+  zone = data;
+});
+// waiting
+socket.on("lobbyUpdate", (data) => {
+  document.getElementById("state").innerText =
+    data.state === "LOBBY"
+      ? "🟡 PHÒNG CHỜ"
+      : data.state === "STARTING"
+      ? "⏳ SẮP BẮT ĐẦU"
+      : "🟢 INGAME";
+
+  document.getElementById("countdown").innerText =
+    data.countdown !== null ? `Bắt đầu sau: ${data.countdown}` : "";
+
+  document.getElementById("players").innerHTML =
+    data.players.map(p => `👤 ${p.name} (${p.type})`).join("<br>");
+});
+socket.on("gameStart", () => {
+  started = true; // ⭐ CHỈ KHI SERVER START
+
+  document.getElementById("menu").style.display = "none";
+  document.getElementById("gameContainer").style.display = "block";
+  document.getElementById("HUD").style.display = "flex";
+  document.getElementById("leaderboard").style.display = "block";
+
+  canvas.focus();
+
+  console.log("🔥 GAME STARTED!");
+});
 // ================= SOCKET =================
 socket.on("clawAnimation", (data) => {
   clawAnims.push({
@@ -320,17 +358,26 @@ socket.on("stunFX", (data) => {
     start: Date.now()
   });
 });
-socket.on("state", data => {
-  players = data.players;
-  bullets = data.bullets;
-  fireZones = data.fireZones || [];
-  walls = data.walls;
-  weaponDrops = data.weaponDrops;
-  manaDrops = data.manaDrops;
-  bombs = data.bombs || [];
-  healDrops = data.healDrops || [];
-  zombies = data.zombies || [];
-  webs = data.webs || [];
+socket.on("gameFull", msg => {
+  alert(msg.message);
+  window.location.reload();
+});
+socket.on("state", (data) => {
+  if (!data) return;
+
+  players = data.players || {};
+  bullets = data.bullets || [];
+
+  fireZones = Array.isArray(data.fireZones) ? data.fireZones : [];
+  walls = Array.isArray(data.walls) ? data.walls : [];
+
+  weaponDrops = Array.isArray(data.weaponDrops) ? data.weaponDrops : [];
+  manaDrops = Array.isArray(data.manaDrops) ? data.manaDrops : [];
+
+  bombs = Array.isArray(data.bombs) ? data.bombs : [];
+  healDrops = Array.isArray(data.healDrops) ? data.healDrops : [];
+  zombies = Array.isArray(data.zombies) ? data.zombies : [];
+  webs = Array.isArray(data.webs) ? data.webs : [];
 });
 socket.on("breakWallFX", (data) => {
   explosions.push({
@@ -446,6 +493,21 @@ socket.on("rankUpFX", (data) => {
     life: 30
   });
 });
+socket.on("gameOver", (data) => {
+  alert("🏆 WINNER: " + data.winner.name);
+
+  // reset game UI
+  document.getElementById("menu").style.display = "block";
+  document.getElementById("gameContainer").style.display = "none";
+});
+socket.on("zoneHurt", (data) => {
+  hitEffects.push({
+    x: data.x,
+    y: data.y,
+    damage: `-${data.dmg}`,
+    life: 25
+  });
+});
 // ================= DRAW LOOP =================
 function draw() {
   ctx.clearRect(0, 0, 800, 600);
@@ -473,6 +535,33 @@ function draw() {
         ctx.restore();
     }
   });
+  if (screenFlashRed > 0) {
+    ctx.fillStyle = "rgba(255,0,0,0.25)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    screenFlashRed--;
+  }
+  // zone
+  if (zone) {
+    if (!zone || typeof zone.radius !== "number") return;
+    // outside red fog
+    ctx.fillStyle = "rgba(255,0,0,0.12)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+    ctx.globalCompositeOperation = "destination-out";
+    let r = Math.max(0, zone.radius);
+
+    ctx.beginPath();
+    ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+  
+    // border
+    ctx.beginPath();
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   // WALLS
   // ctx.fillStyle = "gray";
   // walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));
@@ -946,11 +1035,29 @@ function update() {
       dy: dy / len
     });
   }
+  checkZoneDamage();
 }
 draw();
+function checkZoneDamage() {
+  const me = players[socket.id];
+  if (!me || !zone) return;
+
+  const d = Math.hypot(me.x - zone.x, me.y - zone.y);
+
+  // ⭐ RA NGOÀI ZONE
+  if (d > zone.radius) {
+
+    // 💥 gửi server trừ máu
+    socket.emit("zoneDamage");
+
+    // 🔴 hiệu ứng màn hình đỏ
+    screenFlashRed = 10;
+  }
+}
 function loop() {
   if (started && !chatting) {
     update();
+    updateZone();
   }
   requestAnimationFrame(loop);
 }
@@ -1029,4 +1136,27 @@ window.closeProfile = function() {
     // Đưa focus về canvas để chơi tiếp được luôn
     canvas.focus(); 
 };
-  
+function resetGame() {
+  players = {};
+  bullets = [];
+
+  zone = {
+    x: 400,
+    y: 300,
+    radius: 500,
+    minRadius: 80,
+    shrinkSpeed: 0.2
+  };
+
+  gameWinner = null;
+  gameStarted = true;
+}
+function updateZone() {
+  if (!zone) return;
+
+  if (zone.radius > zone.minRadius) {
+    zone.radius -= zone.shrinkSpeed;
+  } else {
+    zone.radius = zone.minRadius;
+  }
+}

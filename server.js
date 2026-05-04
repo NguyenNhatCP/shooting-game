@@ -17,7 +17,22 @@ let manaDrops = [];
 let bombs = [];
 let zombies = [];
 let webs = [];
-
+let gameMode = "survival";
+let gameStarted = false;
+let minPlayersToStart = 2;
+let gameState = "LOBBY";
+let gameWinner = null;
+let countdownTimer = null;
+let countdownValue = 5;
+let firstFrame = true;
+// let countdownRunning = false;
+let zone = {
+  x: 400,
+  y: 300,
+  radius: 500,
+  minRadius: 80,
+  shrinkRate: 0.04
+};
 const W = 800;
 const H = 600;
 let healDrops = [];
@@ -347,6 +362,20 @@ for (let i = 0; i < 6; i++) spawnWeapon();
 // ================= SOCKET =================
 io.on("connection", (socket) => {
 
+  if (!gameStarted) {
+    socket.emit("lobbyOnly", {
+      message: "Đợi game bắt đầu"
+    });
+  }
+  // ❌ nếu game đã bắt đầu → không cho vào
+  if (gameState === "INGAME") {
+    socket.emit("gameFull", {
+      message: "Game đang diễn ra, vui lòng chờ trận sau!"
+    });
+    socket.disconnect();
+    return;
+  }
+
   const pos = getSafePosition();
 
   players[socket.id] = {
@@ -362,6 +391,10 @@ io.on("connection", (socket) => {
     isDisguised: false,
     disguiseType: null
   };
+  // 👇 THÊM Ở ĐÂY
+  // checkStartGame();
+  checkLobbyStart();
+  updateLobby();
   socket.on("disguise", () => {
     const p = players[socket.id];
     if (!p) return;
@@ -457,35 +490,50 @@ io.on("connection", (socket) => {
     }
 });
   socket.on("selectCharacter", (data) => {
+    if (gameState === "INGAME") return;
+
+    const existing = players[socket.id];
+
+    // ❗ ĐÃ CHỌN RỒI → KHÔNG CHO ĐỔI
+    if (existing && existing.type) {
+      socket.emit("selectBlocked", {
+        message: "Bạn chỉ được chọn 1 nhân vật!"
+      });
+      return;
+    }
+
     console.log("SELECT:", data);
-  
+
     const type = data.type;
     const name = (data.name || "Player").trim();
-  
+
     const c = getCharacter(type);
-  
-    const old = players[socket.id] || {};
-  
     const pos = getSafePosition();
 
     players[socket.id] = {
-      ...old,
+      id: socket.id,
+
       x: pos.x,
       y: pos.y,
+
       hp: c.hp,
       speed: c.speed,
       color: c.color,
+
       name,
-      type,
+      type, // 🔒 LOCK CLASS
+
       weapon: randomWeapon(),
-      weaponMana: old.weaponMana ?? 100,
+      weaponMana: 100,
+
       kills: 0,
       invisible: false,
       invisibleUntil: 0,
-      score: 0,   // ⭐ điểm rank
+      score: 0,
       rank: "Wood",
       stunnedUntil: 0,
     };
+
     io.emit("state", {
       players,
       bullets,
@@ -720,6 +768,8 @@ socket.on("bomberPull", () => {
     });
   });
   socket.on("shoot", (data) => {
+    if (!gameStarted) return;
+
     const p = players[socket.id];
     if (!p) return;
     if (p.stunnedUntil && Date.now() < p.stunnedUntil) {
@@ -903,6 +953,7 @@ socket.on("bomberPull", () => {
   //   console.log(webs);
   // });
   socket.on("skill", () => {
+    if (!gameStarted) return;
     const p = players[socket.id];
     if (!p) return;
   
@@ -932,6 +983,9 @@ socket.on("bomberPull", () => {
   });
   socket.on("disconnect", () => {
     delete players[socket.id];
+    // checkStartGame();
+    checkLobbyStart();
+    updateLobby();
   });
 });
 
@@ -977,13 +1031,22 @@ function explode(x, y, ownerId) {
 }
 // ================= GAME LOOP =================
 setInterval(() => {
+  if (!gameStarted) {
+    io.emit("state", {
+      players,
+      bullets: [],
+      zombies: [],
+      zone
+    });
+    return;
+  }
   updateWebs();
   // 2. DÁN ĐOẠN CHECK MÁU VÀO ĐÂY (Trước khi gửi dữ liệu về client)
   for (let id in players) {
     if (players[id].hp <= 0) {
         handleDeath(id, null); // Hàm này sẽ hồi sinh hoặc xóa player
     }
-}
+  }
   zombies.forEach(z => {
     let target = null;
     let minDist = 9999;
@@ -1430,6 +1493,55 @@ setInterval(() => {
     zombies,
     webs
   });
+  if (!gameStarted) return;
+
+  // shrink zone (FIX START LAG)
+  if (gameStarted) {
+
+    if (firstFrame) {
+      firstFrame = false; // bỏ qua 1 tick đầu tiên
+    } else {
+      if (zone.radius > zone.minRadius) {
+        zone.radius -= zone.shrinkRate;
+
+        if (zone.radius < zone.minRadius) {
+          zone.radius = zone.minRadius;
+        }
+      }
+    }
+  }
+
+  // damage ngoài zone
+  for (let id in players) {
+    const p = players[id];
+    if (!p) continue;
+
+    const d = Math.hypot(p.x - zone.x, p.y - zone.y);
+
+    if (d > zone.radius) {
+      p.hp -= 2; // SURVIVAL DAMAGE
+      io.emit("zoneHurt", {
+        x: p.x,
+        y: p.y,
+        dmg: 2
+      });
+    }
+
+    if (p.hp <= 0) {
+      delete players[id];
+    }
+  }
+
+  // check win condition
+  const alive = Object.keys(players);
+
+  if (alive.length === 1 && !gameWinner) {
+    gameWinner = alive[0];
+    io.emit("gameOver", {
+      winner: players[gameWinner]
+    });
+  }
+  io.emit("zoneUpdate", zone);
 
 }, 1000 / 30);
 function applyExplosionDamage(x, y, ownerId) {
@@ -1676,6 +1788,89 @@ function handleDeath(victimId, killerId) {
   if (killer) {
       killer.score += 100;
   }
+}
+function updateLobby() {
+  io.emit("lobbyUpdate", {
+    state: gameState,
+    players: Object.values(players).map(p => ({
+      id: p.id,
+      name: p.name,
+      type: p.type
+    })),
+    needed: minPlayersToStart,
+    countdown: countdownValue  
+  });
+}
+function checkLobbyStart() {
+  const count = Object.keys(players).length;
+  if (count < minPlayersToStart) {
+    gameState = "LOBBY";
+    countdownValue = 5;
+
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+
+    updateLobby();
+    return;
+  }
+
+  if (gameState === "INGAME") return;
+  if (gameState === "STARTING") return;
+
+  gameState = "STARTING";
+  countdownValue = 5;
+
+  countdownTimer = setInterval(() => {
+    const count = Object.keys(players).length;
+
+    if (count < minPlayersToStart) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+      gameState = "LOBBY";
+      countdownValue = 5;
+      updateLobby();
+      return;
+    }
+
+    countdownValue--;
+    updateLobby();
+
+    if (countdownValue <= 0) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    
+      gameState = "INGAME";
+      countdownValue = 0;
+    
+      // 1. reset zone TRƯỚC
+      zone = {
+        x: 400,
+        y: 300,
+        radius: 500,
+        minRadius: 80,
+        shrinkRate: 0.04
+      };
+    
+      // 2. load map
+      loadMap(currentMap);
+      broadcastMap();
+    
+      // 3. reset player
+      for (let id in players) {
+        const pos = getSafePosition();
+        players[id].x = pos.x;
+        players[id].y = pos.y;
+        players[id].hp = 120;
+      }
+    
+      // 4. CHỈ SET GAMESTARTED SAU CÙNG
+      gameStarted = true;
+      firstFrame = true;
+      io.emit("gameStart");
+      updateLobby();
+      return;
+    }
+  }, 1000);
 }
 server.listen(3000, () => {
   console.log("http://localhost:3000");
