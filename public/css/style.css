@@ -85,4 +85,6 @@
   background: linear-gradient(225deg, rgba(255,255,255,0.1) 0%, transparent 50%);
   pointer-events: none;
 }
-
+.hidden {
+  display: none !important;
+}

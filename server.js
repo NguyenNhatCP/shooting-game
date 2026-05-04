@@ -133,6 +133,49 @@ const maps = {
 
       return walls;
     }
+  },
+  volcano: {
+    name: "Volcano",
+    generate: () => {
+      let walls = [];
+      const tile = 40;
+  
+      for (let y = 0; y < 15; y++) {
+        for (let x = 0; x < 20; x++) {
+  
+          // viền
+          if (x === 0 || y === 0 || x === 19 || y === 14) {
+            walls.push({ x: x * tile, y: y * tile, w: tile, h: tile });
+            continue;
+          }
+  
+          // đá cứng
+          if (Math.random() < 0.1) {
+            walls.push({
+              x: x * tile,
+              y: y * tile,
+              w: tile,
+              h: tile,
+              breakable: false
+            });
+            continue;
+          }
+  
+          // lava
+          if (Math.random() < 0.04) {
+            fireZones.push({
+              x: x * tile + 20,
+              y: y * tile + 20,
+              radius: 25,
+              start: Date.now(),
+              duration: 999999
+            });
+          }
+        }
+      }
+  
+      return walls;
+    }
   }
 };
 let walls = [];
@@ -1226,7 +1269,12 @@ setInterval(() => {
       let dist = Math.hypot(p.x - z.x, p.y - z.y);
 
       if (dist < z.radius) {
-        p.hp -= 0.3;
+        p.hp -= 0.5;
+        io.emit("burnFX", {
+          id: id,
+          x: p.x,
+          y: p.y
+        });
         if (p.hp <= 0) delete players[id];
       }
     }
@@ -1476,6 +1524,7 @@ function applyExplosionDamage(x, y, ownerId) {
 }
 function loadMap(name) {
   currentMap = name;
+  fireZones = [];
   walls = maps[name].generate();
   clearSpawnArea();
 
@@ -1607,10 +1656,12 @@ function handleDeath(victimId, killerId) {
   //     console.log(`${victim.id} đã được giải cứu khỏi kiếp Zombie!`);
   // } 
   if (killer && killer.type === "spider") {
+      spawnZombie(victim.x, victim.y, victimId);
+      delete players[victimId];
       // Nếu người thường bị Spider giết -> Biến thành Zombie
-      victim.type = "zombie";
-      victim.hp = 80;
-      victim.name = "Z- " + victim.name;
+      // victim.type = "zombie";
+      // victim.hp = 80;
+      // victim.name = "Z- " + victim.name;
   } 
   else {
       // Chết do các nguyên nhân khác
