@@ -21,7 +21,6 @@ let spinFX = [];
 let pullFX = [];
 let pulledState = {}; 
 let webs = [];
-let burnEffects = [];
 let started = false;
 let chatting = false;
 let screenFlashRed = 0;
@@ -70,18 +69,7 @@ characterImages.spider.src = "/assets/spider.png";
 // grassImg.src = "/assets/grass.png";
 const mineImg = new Image();
 mineImg.src = "/assets/mine.png";
-const fireImg = new Image();
-let fireLoaded = false;
 
-fireImg.onload = () => {
-  fireLoaded = true;
-};
-
-fireImg.onerror = () => {
-  console.error("🔥 load fire.png fail");
-};
-
-fireImg.src = "/assets/fire.png";
 const woodImg = new Image();
 woodImg.src = "/assets/wood.png"; // tường phá được
 const weaponImages = {
@@ -157,11 +145,6 @@ chatInput.addEventListener("blur", () => {
   chatting = false;
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    document.getElementById("profile").classList.add("hidden");
-  }
-});
-document.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     if (!chatting) {
       chatInput.focus();
@@ -218,10 +201,6 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "3") {
     socket.emit("changeMap", "desert");
   }
-
-  if (e.key === "4") {
-    socket.emit("changeMap", "volcano");
-  }
 });
 // 1. Chỉ lắng nghe các phím cần thiết
 let canSkill = true;
@@ -252,6 +231,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("blur", () => {
   keys.w = keys.a = keys.s = keys.d = false;
 });
+
 canvas.addEventListener("mousedown", (e) => {
   if (e.button !== 0 || chatting) return;
 
@@ -324,13 +304,6 @@ socket.on("clawAnimation", (data) => {
     life: 1.0
   });
 });
-socket.on("burnFX", data => {
-  burnEffects.push({
-    x: data.x,
-    y: data.y,
-    life: 300 // ms
-  });
-});
 socket.on("assassinSpinFX", (data) => {
   spinFX.push({
     x: data.x,
@@ -358,6 +331,7 @@ socket.on("stunFX", (data) => {
     start: Date.now()
   });
 });
+<<<<<<< HEAD
 socket.on("gameFull", msg => {
   alert(msg.message);
   window.location.reload();
@@ -378,6 +352,19 @@ socket.on("state", (data) => {
   healDrops = Array.isArray(data.healDrops) ? data.healDrops : [];
   zombies = Array.isArray(data.zombies) ? data.zombies : [];
   webs = Array.isArray(data.webs) ? data.webs : [];
+=======
+socket.on("state", data => {
+  players = data.players;
+  bullets = data.bullets;
+  fireZones = data.fireZones;
+  walls = data.walls;
+  weaponDrops = data.weaponDrops;
+  manaDrops = data.manaDrops;
+  bombs = data.bombs || [];
+  healDrops = data.healDrops || [];
+  zombies = data.zombies || [];
+  webs = data.webs || [];
+>>>>>>> parent of befb903 (update)
 });
 socket.on("breakWallFX", (data) => {
   explosions.push({
@@ -449,17 +436,23 @@ socket.on("mapChanged", (data) => {
 const lbList = document.getElementById("lbList");
 
 socket.on("state", (state) => {
-  const playersArr = state.players;
-  let list = Object.values(playersArr);
+  const players = state.players;
+
+  // convert object → array
+  let list = Object.values(players);
+
+  // sort theo score giảm dần
   list.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  // lấy top 5
   list = list.slice(0, 5);
 
-  // Cập nhật lại HTML cho Leaderboard kèm sự kiện click
+  // render
   lbList.innerHTML = list.map((p, i) => `
-      <div onclick="viewPlayerProfile('${p.id}')" style="cursor: pointer; padding: 2px; transition: 0.2s;" onmouseover="this.style.color='gold'" onmouseout="this.style.color='white'">
-          ${i + 1}. ${p.name} (${p.score || 0})
-      </div>
-  `).join("");
+<div>
+  ${i + 1}. ${p.name} (${p.score || 0})
+</div>
+`).join("");
 });
 socket.on("scoreFX", (data) => {
   const p = players[data.id];
@@ -571,42 +564,6 @@ function draw() {
     } else {
       drawImg(wallImg, w.x, w.y, w.w, w.h); // 🧱 tường cứng
     }
-  });
-  burnEffects.forEach(e => {
-    ctx.fillStyle = "orange";
-    ctx.beginPath();
-    ctx.arc(e.x + 16, e.y + 16, 10, 0, Math.PI * 2);
-    ctx.fill();
-  
-    e.life -= 16;
-  });
-  
-  burnEffects = burnEffects.filter(e => e.life > 0);
-  // 🔥 VẼ LAVA
-  let time = Date.now() * 0.005;
-
-  fireZones.forEach((z, i) => {
-    if (!fireLoaded) return;
-  
-    const baseSize = z.radius * 2;
-  
-    // dùng sin → mượt
-    const offsetX = Math.sin(time + i) * 1.5;
-    const offsetY = Math.cos(time + i) * 1.5;
-  
-    const size = baseSize + Math.sin(time * 2 + i) * 2;
-  
-    ctx.globalAlpha = 0.85 + Math.sin(time * 3 + i) * 0.1;
-  
-    ctx.drawImage(
-      fireImg,
-      z.x - z.radius + offsetX,
-      z.y - z.radius + offsetY,
-      size,
-      size
-    );
-  
-    ctx.globalAlpha = 1;
   });
   // ================= HEAL DROPS =================
   healDrops.forEach(h => {
@@ -1015,6 +972,7 @@ function draw() {
       hitEffects.splice(i, 1);
     }
   }
+
   requestAnimationFrame(draw);
 }
 function update() {
@@ -1098,6 +1056,7 @@ function getRankColor(rank) {
     case "Diamond": return "#00e5ff";
     default: return "white";
   }
+<<<<<<< HEAD
 }// Hàm hiển thị profile với dữ liệu cụ thể
 function showProfile(playerData) {
   if (!playerData) return;
@@ -1159,4 +1118,6 @@ function updateZone() {
   } else {
     zone.radius = zone.minRadius;
   }
+=======
+>>>>>>> parent of befb903 (update)
 }
